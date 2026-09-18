@@ -1,9 +1,9 @@
 package com.talos.core;
 
-import com.talos.model.Unit;
-import com.talos.model.CommandDto;
-import com.talos.gis.RoadService;
-import com.talos.gis.TerrainService;
+import com.talos.model.domain.Unit;
+import com.talos.model.dto.c2.CommandDto;
+import com.talos.gis.service.RoadService;
+import com.talos.gis.service.TerrainService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
