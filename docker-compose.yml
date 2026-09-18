@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  talos-db:
+    image: postgis/postgis:16-3.4
+    container_name: talos-postgres
+    environment:
+      POSTGRES_DB: talos_db
+      POSTGRES_USER: talos_admin
+      POSTGRES_PASSWORD: talos_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - talos_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  talos_pgdata:
