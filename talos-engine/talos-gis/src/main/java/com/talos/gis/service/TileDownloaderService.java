@@ -71,8 +71,10 @@ public class TileDownloaderService {
                         final int tileY = y;
 
                         executor.submit(() -> {
-                            downloadSingleTile(urlTemplate, baseOutputDir, tileZ, tileX, tileY);
-                            downloadedCount.incrementAndGet();
+                            boolean success = downloadSingleTileWithRetry(urlTemplate, baseOutputDir, tileZ, tileX, tileY, 3);
+                            if (success) {
+                                downloadedCount.incrementAndGet();
+                            }
                         });
                     }
                 }
@@ -83,38 +85,41 @@ public class TileDownloaderService {
         return downloadedCount.get();
     }
 
-    private void downloadSingleTile(String urlTemplate, Path baseDir, int z, int x, int y) {
-        try {
-            Path tilePath = baseDir.resolve(String.valueOf(z))
-                    .resolve(String.valueOf(x))
-                    .resolve(y + ".png");
+    private boolean downloadSingleTileWithRetry(String urlTemplate, Path baseDir, int z, int x, int y, int retries) {
+        Path tilePath = baseDir.resolve(String.valueOf(z))
+                .resolve(String.valueOf(x))
+                .resolve(y + ".png");
 
-            if (Files.exists(tilePath)) {
-                return; // Tile already exists locally
-            }
-
-            Files.createDirectories(tilePath.getParent());
-
-            String requestUrl = urlTemplate.replace("{z}", String.valueOf(z))
-                    .replace("{x}", String.valueOf(x))
-                    .replace("{y}", String.valueOf(y));
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(requestUrl))
-                    .header("User-Agent", "TALOS-Simulation-Engine/1.0")
-                    .timeout(Duration.ofSeconds(15))
-                    .GET()
-                    .build();
-
-            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
-
-            if (response.statusCode() == 200) {
-                Files.write(tilePath, response.body());
-            } else {
-                log.warn("[TILE DOWNLOADER] Failed to fetch tile {}/{}/{} HTTP {}", z, x, y, response.statusCode());
-            }
-        } catch (Exception e) {
-            log.debug("[TILE DOWNLOADER] Error saving tile {}/{}/{}: {}", z, x, y, e.getMessage());
+        if (Files.exists(tilePath)) {
+            return true;
         }
+
+        String requestUrl = urlTemplate.replace("{z}", String.valueOf(z))
+                .replace("{x}", String.valueOf(x))
+                .replace("{y}", String.valueOf(y));
+
+        for (int attempt = 1; attempt <= retries; attempt++) {
+            try {
+                Files.createDirectories(tilePath.getParent());
+
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(requestUrl))
+                        .header("User-Agent", "TALOS-Simulation-Engine/1.0 (Defense Research Map Client)")
+                        .timeout(Duration.ofSeconds(12))
+                        .GET()
+                        .build();
+
+                HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+
+                if (response.statusCode() == 200) {
+                    Files.write(tilePath, response.body());
+                    return true;
+                } else if (response.statusCode() == 503 || response.statusCode() == 429) {
+                    // Rate limit hit: wait exponentially before retry (100ms, 250ms, 500ms)
+                    Thread.sleep(attempt * 150L);
+                }
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
 }

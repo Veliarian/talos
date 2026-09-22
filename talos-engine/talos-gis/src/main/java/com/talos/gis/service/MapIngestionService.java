@@ -102,7 +102,7 @@ public class MapIngestionService {
                 ? List.of("SATELLITE")
                 : request.layerTypes();
 
-        int minZ = (request.minZoom() != null) ? request.minZoom() : 12;
+        int minZ = (request.minZoom() != null) ? request.minZoom() : 10;
         int maxZ = (request.maxZoom() != null) ? request.maxZoom() : 15;
 
         for (int i = 0; i < layerTypes.size(); i++) {

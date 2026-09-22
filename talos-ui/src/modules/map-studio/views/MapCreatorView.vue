@@ -243,7 +243,7 @@ const form = reactive<MapCreationRequest>({
     centerLon: 23.5850,
     sizeKm: 20,
     layerTypes: ['SATELLITE', 'TOPOGRAPHIC'],
-    minZoom: 12,
+    minZoom: 10,
     maxZoom: 15
 });
 

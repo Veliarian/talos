@@ -48,8 +48,19 @@
                 @click="$emit('open-map', map)"
             >
                 <div class="tile-header">
-                    <div class="tile-title">{{ map.name }}</div>
-                    <span class="badge" :class="map.status.toLowerCase()">{{ map.status }}</span>
+                    <div class="tile-title-group">
+                        <div class="tile-title">{{ map.name }}</div>
+                        <span class="badge" :class="map.status.toLowerCase()">{{ map.status }}</span>
+                    </div>
+
+                    <!-- Delete Map Button (click.stop prevents opening editor) -->
+                    <button
+                        class="btn-delete-card"
+                        title="Видалити карту та файли"
+                        @click.stop="confirmDelete(map)"
+                    >
+                        🗑️
+                    </button>
                 </div>
 
                 <div class="tile-desc">{{ map.description || 'Локальний полігон бойового моделювання' }}</div>
@@ -96,11 +107,18 @@ const props = defineProps<{
     maps: MapDetailDto[];
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
     (e: 'create-new'): void;
     (e: 'open-map', map: MapDetailDto): void;
     (e: 'open-catalog'): void;
+    (e: 'delete-map', mapId: string): void;
 }>();
+
+const confirmDelete = (map: MapDetailDto) => {
+    if (confirm(`Ви дійсно бажаєте видалити карту "${map.name}" та всі її файли з сервера?`)) {
+        emit('delete-map', map.id);
+    }
+};
 
 const searchQuery = ref('');
 
@@ -321,5 +339,25 @@ const getMgrs = (lat: number, lon: number) => {
     font-size: 36px;
     color: #00a8ff;
     margin-bottom: 12px;
+}
+.tile-title-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.btn-delete-card {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #ef4444;
+    padding: 4px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+.btn-delete-card:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: #ef4444;
+    transform: scale(1.1);
 }
 </style>

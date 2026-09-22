@@ -66,4 +66,13 @@ public final class GeoMath {
                 Math.max(minY, maxY)
         );
     }
+
+    public static double lonToTileXDouble(double lon, int zoom) {
+        return (lon + 180.0) / 360.0 * (1 << zoom);
+    }
+
+    public static double latToTileYDouble(double lat, int zoom) {
+        double latRad = Math.toRadians(lat);
+        return (1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * (1 << zoom);
+    }
 }

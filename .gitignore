@@ -27,3 +27,13 @@ logs/
 talos_pgdata/
 *.pbf
 talos-data/tools/
+
+talos-engine/**/talos-data/
+talos-engine/talos-data/
+
+talos-data/maps/
+**/maps/*/tiles/
+**/maps/*/terrain.tif
+
+*.tif.tmp
+*.png.tmp

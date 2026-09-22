@@ -53,5 +53,30 @@ export const mapApi = {
             body: JSON.stringify(modifier)
         });
         if (!res.ok) throw new Error('Failed to update modifier');
+    },
+
+    // Sculpt elevation terrain raster (dig, raise, flatten)
+    async sculptTerrain(mapId: string, req: {
+        centerLat: number;
+        centerLon: number;
+        radiusMeters: number;
+        operation: 'DIG' | 'RAISE' | 'FLATTEN';
+        deltaMeters: number;
+    }): Promise<any> {
+        const res = await fetch(`${API_BASE}/${mapId}/terrain/sculpt`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req)
+        });
+        if (!res.ok) throw new Error('Failed to sculpt terrain');
+        return res.json();
+    },
+
+    // Delete map from database and wipe all its local files
+    async deleteMap(mapId: string): Promise<void> {
+        const res = await fetch(`${API_BASE}/${mapId}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete map');
     }
 };

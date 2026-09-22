@@ -7,6 +7,7 @@
             @create-new="currentScreen = 'creator'"
             @open-map="openEditor"
             @open-catalog="openCatalogModal = true"
+            @delete-map="onDeleteMap"
         />
 
         <!-- 2. Interactive Map Creator Screen (Bounding area visual picker + coordinates) -->
@@ -73,6 +74,15 @@ const openEditor = (map: MapDetailDto) => {
 const onMapCreated = async () => {
     await fetchMaps();
     currentScreen.value = 'hub';
+};
+
+const onDeleteMap = async (mapId: string) => {
+    try {
+        await mapApi.deleteMap(mapId);
+        await fetchMaps();
+    } catch (err: any) {
+        alert('Помилка видалення карти: ' + err.message);
+    }
 };
 
 onMounted(fetchMaps);
