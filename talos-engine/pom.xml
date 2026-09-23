@@ -20,6 +20,7 @@
         <spring.boot.version>3.3.3</spring.boot.version>
         <lombok.version>1.18.34</lombok.version>
         <twelvemonkeys.version>3.11.0</twelvemonkeys.version>
+        <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
     </properties>
 
     <modules>
@@ -40,7 +41,7 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- Внутрішні модулі TALOS -->
+            <!-- TALOS Internal Modules -->
             <dependency>
                 <groupId>com.talos</groupId>
                 <artifactId>talos-model</artifactId>
@@ -78,4 +79,28 @@
             <artifactId>slf4j-api</artifactId>
         </dependency>
     </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${maven.compiler.plugin.version}</version>
+                    <configuration>
+                        <source>21</source>
+                        <target>21</target>
+                        <!-- Critical for Spring Boot 3 @PathVariable and @RequestParam reflection -->
+                        <parameters>true</parameters>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>

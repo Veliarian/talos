@@ -1,21 +1,21 @@
 <template>
     <div class="hub-container">
         <!-- Top Tactical Action Bar -->
-        <div class="hub-top-bar">
+        <header class="hub-top-bar">
             <div class="title-group">
                 <h2>БІБЛІОТЕКА КАРТ ТА ТЕАТРІВ ВОЄННИХ ДІЙ (ТВД)</h2>
                 <p>Виберіть існуючу карту для налаштування характеристик або згенеруйте новий квадрат.</p>
             </div>
 
             <div class="action-group">
-                <button class="btn-catalog" @click="$emit('open-catalog')">
+                <button type="button" class="btn-catalog" @click="$emit('open-catalog')">
                     <span class="btn-icon">⚙</span> ДОВІДНИК ТТХ ОБ'ЄКТІВ
                 </button>
-                <button class="btn-create" @click="$emit('create-new')">
+                <button type="button" class="btn-create" @click="$emit('create-new')">
                     <span class="btn-icon">+</span> СТВОРИТИ НОВУ КАРТУ
                 </button>
             </div>
-        </div>
+        </header>
 
         <!-- Search and View Filter -->
         <div class="filter-bar">
@@ -36,7 +36,7 @@
                 <div class="radar-icon">⌖</div>
                 <h3>Карти не знайдені</h3>
                 <p>Створіть свій перший бойовий квадрат розміром 10-50 км для початку роботи.</p>
-                <button class="btn-create" @click="$emit('create-new')">+ СТВОРИТИ КАРТУ</button>
+                <button type="button" class="btn-create" @click="$emit('create-new')">+ СТВОРИТИ КАРТУ</button>
             </div>
         </div>
 
@@ -45,7 +45,10 @@
                 v-for="map in filteredMaps"
                 :key="map.id"
                 class="map-tile-card"
+                role="button"
+                tabindex="0"
                 @click="$emit('open-map', map)"
+                @keydown.enter="$emit('open-map', map)"
             >
                 <div class="tile-header">
                     <div class="tile-title-group">
@@ -55,6 +58,7 @@
 
                     <!-- Delete Map Button (click.stop prevents opening editor) -->
                     <button
+                        type="button"
                         class="btn-delete-card"
                         title="Видалити карту та файли"
                         @click.stop="confirmDelete(map)"
@@ -72,7 +76,7 @@
                     </div>
                     <div class="spec-row">
                         <span>Центр (WGS84):</span>
-                        <strong>{{ map.centerLat.toFixed(4) }}°N, {{ map.centerLon.toFixed(4) }}°E</strong>
+                        <strong>{{ formatCoords(map.centerLat, map.centerLon) }}</strong>
                     </div>
                     <div class="spec-row">
                         <span>Координатна сітка MGRS:</span>
@@ -91,7 +95,7 @@
               {{ layer.layerType }}
             </span>
                     </div>
-                    <button class="btn-open-editor">НАЛАШТУВАТИ ТТХ →</button>
+                    <button type="button" class="btn-open-editor">НАЛАШТУВАТИ ТТХ →</button>
                 </div>
             </div>
         </div>
@@ -100,8 +104,8 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import type { MapDetailDto } from '../types';
-import { coordConverter } from '../coordConverter';
+import type { MapDetailDto } from '@/modules/map-studio/types';
+import { coordConverter } from '@/shared/utils/coordConverter';
 
 const props = defineProps<{
     maps: MapDetailDto[];
@@ -124,14 +128,20 @@ const searchQuery = ref('');
 
 const filteredMaps = computed(() => {
     if (!searchQuery.value.trim()) return props.maps;
-    const q = searchQuery.value.toLowerCase();
-    return props.maps.filter(m =>
-        m.name.toLowerCase().includes(q) || (m.description && m.description.toLowerCase().includes(q))
+    const query = searchQuery.value.toLowerCase();
+    return props.maps.filter(map =>
+        map.name.toLowerCase().includes(query) || (map.description && map.description.toLowerCase().includes(query))
     );
 });
 
-const getMgrs = (lat: number, lon: number) => {
+const getMgrs = (lat: number, lon: number): string => {
     return coordConverter.toMgrsEstimate(lat, lon);
+};
+
+const formatCoords = (lat: number, lon: number): string => {
+    const latH = lat >= 0 ? 'N' : 'S';
+    const lonH = lon >= 0 ? 'E' : 'W';
+    return `${Math.abs(lat).toFixed(4)}°${latH}, ${Math.abs(lon).toFixed(4)}°${lonH}`;
 };
 </script>
 

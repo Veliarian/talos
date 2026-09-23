@@ -1,59 +1,60 @@
 package com.talos.gis.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.talos.gis.repository.RoadSpatialRepository;
 import com.talos.model.domain.Unit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Service managing road route extraction and surface spatial queries via JPA repositories.
+ */
 @Service
 public class RoadService {
-    private static final Logger log = LoggerFactory.getLogger(RoadService.class);
-    private final JdbcTemplate jdbcTemplate;
 
-    public RoadService(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    private static final Logger log = LoggerFactory.getLogger(RoadService.class);
+
+    private final RoadSpatialRepository roadSpatialRepository;
+    private final ObjectMapper objectMapper;
+
+    public RoadService(RoadSpatialRepository roadSpatialRepository, ObjectMapper objectMapper) {
+        this.roadSpatialRepository = roadSpatialRepository;
+        this.objectMapper = objectMapper;
     }
 
     /**
-     * Витягує з PostGIS найдовшу суцільну дорогу полігону
-     * і повертає список точок (вигинів дороги) у форматі Lat/Lon
+     * Extracts the longest continuous road line in the theater and returns ordered waypoints.
+     * Uses GeoJSON structure for reliable parsing.
      */
     public List<Unit.Waypoint> extractLongestRoadRoute() {
         List<Unit.Waypoint> roadPoints = new ArrayList<>();
+
         try {
-            // Запит повертає лінію дороги у текстовому форматі WKT (Well-Known Text)
-            String sql = """
-                SELECT ST_AsText(ST_Transform(way, 4326)) 
-                FROM planet_osm_line 
-                WHERE highway IN ('primary', 'secondary', 'tertiary', 'unclassified', 'road')
-                ORDER BY ST_Length(way) DESC 
-                LIMIT 1;
-            """;
+            var geoJsonOpt = roadSpatialRepository.findLongestRoadGeoJson();
 
-            String wkt = jdbcTemplate.queryForObject(sql, String.class);
+            if (geoJsonOpt.isPresent()) {
+                JsonNode root = objectMapper.readTree(geoJsonOpt.get());
+                JsonNode coordinates = root.get("coordinates");
 
-            if (wkt != null && wkt.startsWith("LINESTRING")) {
-                // Парсимо рядок виду "LINESTRING(lon1 lat1, lon2 lat2, ...)"
-                String coordsPart = wkt.substring(wkt.indexOf("(") + 1, wkt.indexOf(")"));
-                String[] pairs = coordsPart.split(",");
-
-                for (String pair : pairs) {
-                    String[] lonLat = pair.trim().split(" ");
-                    double lon = Double.parseDouble(lonLat[0]);
-                    double lat = Double.parseDouble(lonLat[1]);
-                    roadPoints.add(new Unit.Waypoint(lat, lon));
+                if (coordinates != null && coordinates.isArray()) {
+                    for (JsonNode coord : coordinates) {
+                        double lon = coord.get(0).asDouble();
+                        double lat = coord.get(1).asDouble();
+                        roadPoints.add(new Unit.Waypoint(lat, lon));
+                    }
+                    log.info("[ROAD SERVICE] Successfully loaded road route with {} vertices", roadPoints.size());
                 }
-                log.info("[ROAD SERVICE] Успішно завантажено маршрут дороги з {} точок вигину", roadPoints.size());
             }
         } catch (Exception e) {
-            log.warn("[ROAD SERVICE] Не вдалося завантажити дорогу з бази, використовується резервний маршрут", e);
+            log.warn("[ROAD SERVICE] Failed to parse road geometry from database, using fallback route: {}", e.getMessage());
         }
 
-        // Якщо база ще порожня — плавний звивистий резервний маршрут траси Т-1425
+        // Fallback route (T-1425 highway section) if database is empty or connection fails
         if (roadPoints.isEmpty()) {
             roadPoints.add(new Unit.Waypoint(49.9880, 23.5450));
             roadPoints.add(new Unit.Waypoint(49.9895, 23.5600));
@@ -65,23 +66,14 @@ public class RoadService {
         return roadPoints;
     }
 
+    /**
+     * Determines whether the given coordinate point is located on an active road surface within buffer radius.
+     */
     public boolean isOnRoad(double lat, double lon, double bufferMeters) {
         try {
-            String sql = """
-                SELECT EXISTS (
-                    SELECT 1 FROM planet_osm_line 
-                    WHERE highway IS NOT NULL 
-                    AND ST_DWithin(
-                        way, 
-                        ST_Transform(ST_SetSRID(ST_MakePoint(CAST(? AS double precision), CAST(? AS double precision)), 4326), 3857), 
-                        CAST(? AS double precision)
-                    )
-                    LIMIT 1
-                );
-            """;
-            Boolean result = jdbcTemplate.queryForObject(sql, Boolean.class, lon, lat, bufferMeters);
-            return Boolean.TRUE.equals(result);
+            return roadSpatialRepository.isPointOnRoad(lat, lon, bufferMeters);
         } catch (Exception e) {
+            log.debug("[ROAD SERVICE] Failed spatial road containment check: {}", e.getMessage());
             return false;
         }
     }

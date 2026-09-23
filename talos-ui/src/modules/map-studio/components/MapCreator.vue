@@ -5,7 +5,7 @@
             <span class="badge">100% OFFLINE</span>
         </div>
 
-        <form @submit.prevent="submitCreation" class="form-grid">
+        <form class="form-grid" @submit.prevent="submitCreation">
             <div class="form-group full-width">
                 <label>НАЗВА КАРТИ / ПОЛІГОНУ:</label>
                 <input v-model="form.name" type="text" required placeholder="наприклад, Яворівський полігон 20х20" />
@@ -44,15 +44,15 @@
                 <label>ПІДКЛАДКИ ДЛЯ ЗАВАНТАЖЕННЯ НА СЕРВЕР:</label>
                 <div class="checkbox-row">
                     <label class="checkbox-label">
-                        <input type="checkbox" value="SATELLITE" v-model="form.layerTypes" />
+                        <input v-model="form.layerTypes" type="checkbox" value="SATELLITE" />
                         <span>Супутник (Esri World Imagery)</span>
                     </label>
                     <label class="checkbox-label">
-                        <input type="checkbox" value="TOPOGRAPHIC" v-model="form.layerTypes" />
+                        <input v-model="form.layerTypes" type="checkbox" value="TOPOGRAPHIC" />
                         <span>Топографія (OpenTopoMap)</span>
                     </label>
                     <label class="checkbox-label">
-                        <input type="checkbox" value="TACTICAL" v-model="form.layerTypes" />
+                        <input v-model="form.layerTypes" type="checkbox" value="TACTICAL" />
                         <span>Тактична (Контрастна штабна)</span>
                     </label>
                 </div>
@@ -69,13 +69,13 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
-import { mapApi } from '../mapApi';
-import type { MapCreationRequest } from '../types';
+import { mapApi } from '@/modules/map-studio/mapApi';
+import type { MapCreationRequest } from '@/modules/map-studio/types';
 
 const emit = defineEmits<{ (e: 'created'): void }>();
 const loading = ref(false);
 
-// Default form coordinates (Yavoriv training area)
+// Default form coordinates (Yavoriv training area baseline)
 const form = reactive<MapCreationRequest>({
     name: '',
     description: '',
@@ -94,8 +94,9 @@ const submitCreation = async () => {
         form.name = '';
         form.description = '';
         emit('created');
-    } catch (err: any) {
-        alert('Помилка створення карти: ' + err.message);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        alert('Помилка створення карти: ' + message);
     } finally {
         loading.value = false;
     }

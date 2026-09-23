@@ -2,7 +2,7 @@
     <div class="card-panel">
         <div class="panel-header">
             <h4>ЛОКАЛЬНІ КАРТИ НА СЕРВЕРІ ({{ maps.length }})</h4>
-            <button class="btn-refresh" @click="$emit('refresh')">ОНОВИТИ</button>
+            <button type="button" class="btn-refresh" @click="$emit('refresh')">ОНОВИТИ</button>
         </div>
 
         <div v-if="maps.length === 0" class="empty-state">
@@ -15,7 +15,10 @@
                 :key="map.id"
                 class="map-card"
                 :class="{ active: selectedMapId === map.id }"
+                role="button"
+                tabindex="0"
                 @click="$emit('select', map)"
+                @keydown.enter="$emit('select', map)"
             >
                 <div class="card-top">
                     <span class="map-name">{{ map.name }}</span>
@@ -46,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import type { MapDetailDto } from '../types';
+import type { MapDetailDto } from '@/modules/map-studio/types';
 
 defineProps<{
     maps: MapDetailDto[];
@@ -89,6 +92,7 @@ defineEmits<{
     cursor: pointer;
     font-size: 10px;
     font-family: monospace;
+    transition: all 0.15s ease-in-out;
 }
 .btn-refresh:hover {
     color: #fff;
@@ -112,8 +116,9 @@ defineEmits<{
     padding: 12px;
     cursor: pointer;
     transition: all 0.2s;
+    outline: none;
 }
-.map-card:hover {
+.map-card:hover, .map-card:focus-visible {
     border-color: #00a8ff;
     background: rgba(0, 168, 255, 0.05);
 }
@@ -144,6 +149,10 @@ defineEmits<{
 .status-tag.downloading {
     background: rgba(241, 196, 15, 0.2);
     color: #f1c40f;
+}
+.status-tag.failed {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
 }
 .map-desc {
     font-size: 11px;

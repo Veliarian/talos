@@ -1,4 +1,4 @@
-package com.talos.model.dto.gis;
+package com.talos.gis.dto;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -22,6 +22,12 @@ public record MapDetailDto(
         OffsetDateTime createdAt,
         List<MapLayerDto> layers
 ) {
+    public MapDetailDto {
+        if (layers == null) {
+            layers = List.of();
+        }
+    }
+
     public record MapLayerDto(
             UUID id,
             String layerType,

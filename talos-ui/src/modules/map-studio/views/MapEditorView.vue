@@ -1,9 +1,9 @@
 <template>
     <div class="editor-workspace">
         <!-- Top Bar: Layer Visibility Toggles -->
-        <div class="editor-header">
+        <header class="editor-header">
             <div class="header-left">
-                <button class="btn-back" @click="$emit('back')">← НАЗАД ДО КАРТ</button>
+                <button type="button" class="btn-back" @click="$emit('back')">← НАЗАД ДО КАРТ</button>
                 <span class="map-title">{{ map.name }}</span>
             </div>
 
@@ -39,7 +39,7 @@
             <div class="header-right">
                 <span class="spec-badge green">100% OFFLINE</span>
             </div>
-        </div>
+        </header>
 
         <!-- Main Workspace -->
         <div class="editor-body">
@@ -52,7 +52,7 @@
                     <div class="hud-top-row">
                         <div>ТВД: <strong>{{ map.name }}</strong> ({{ map.sizeKm }}×{{ map.sizeKm }} км)</div>
 
-                        <!-- Perspective Button (placed safely on the map viewport) -->
+                        <!-- Perspective Button -->
                         <button
                             type="button"
                             class="hud-perspective-btn"
@@ -69,28 +69,101 @@
                     </div>
                 </div>
 
-                <!-- Inspected Feature Banner -->
+                <!-- Detailed Individual Feature Inspector Modal / Drawer -->
                 <div v-if="inspectedFeature && layerStack.objects" class="feature-inspector-banner">
                     <div class="fib-header">
                         <span class="fib-cat" :class="inspectedFeature.category.toLowerCase()">{{ inspectedFeature.category }}</span>
-                        <strong>{{ inspectedFeature.name }}</strong>
-                        <button class="fib-close" @click="clearInspection">✕</button>
+                        <input v-model="inspectedFeature.name" class="fib-name-input" />
+                        <button type="button" class="fib-close" @click="clearInspection">✕</button>
                     </div>
-                    <div class="fib-details">
-                        <span>OSM Тег: <code>{{ inspectedFeature.typeKey }}={{ inspectedFeature.typeValue }}</code></span>
-                        <span v-if="inspectedModifier">Шв. колісних: <strong>{{ (inspectedModifier.speedModifierWheeled * 100).toFixed(0) }}%</strong></span>
-                        <span v-if="inspectedModifier">Захист укриття: <strong>{{ inspectedModifier.coverDefensePercent }}%</strong></span>
+
+                    <div class="fib-status-row">
+                        <label>ШАБЛОН ТТХ:</label>
+                        <select class="status-select" @change="applyTemplateToSelectedFeature(($event.target as HTMLSelectElement).value)">
+                            <option value="">-- Обрати шаблон із довідника --</option>
+                            <option v-for="t in availableTemplates" :key="t.id" :value="t.id">
+                                {{ t.description }} ({{ t.category }})
+                            </option>
+                        </select>
+                    </div>
+
+                    <div class="fib-meta">
+                        OSM: <code>{{ inspectedFeature.typeKey }}={{ inspectedFeature.typeValue }}</code>
+                        <span v-if="inspectedFeature.isCustomModified" class="custom-badge">ІНДИВІДУАЛЬНІ ТТХ</span>
+                    </div>
+
+                    <!-- Individual Overrides Form -->
+                    <div class="fib-overrides-grid">
+                        <div class="override-field">
+                            <label>Шв. Колісні (оверрайд):</label>
+                            <input
+                                v-model.number="inspectedFeature.speedOverrideWheeled"
+                                type="number"
+                                step="0.05"
+                                min="0"
+                                max="1.5"
+                                :placeholder="defaultSpeedWheeled"
+                                class="num-field"
+                            />
+                        </div>
+                        <div class="override-field">
+                            <label>Шв. Гусеничні (оверрайд):</label>
+                            <input
+                                v-model.number="inspectedFeature.speedOverrideTracked"
+                                type="number"
+                                step="0.05"
+                                min="0"
+                                max="1.5"
+                                :placeholder="defaultSpeedTracked"
+                                class="num-field"
+                            />
+                        </div>
+                        <div class="override-field">
+                            <label>Захист укриття (%):</label>
+                            <input
+                                v-model.number="inspectedFeature.coverOverride"
+                                type="number"
+                                step="5"
+                                min="0"
+                                max="95"
+                                :placeholder="defaultCoverDefense"
+                                class="num-field"
+                            />
+                        </div>
+                        <div class="override-field">
+                            <label>Видимість (м):</label>
+                            <input
+                                v-model.number="inspectedFeature.visibilityOverride"
+                                type="number"
+                                step="10"
+                                min="0"
+                                max="5000"
+                                :placeholder="defaultVisibility"
+                                class="num-field"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="fib-notes-row">
+                        <input v-model="inspectedFeature.customNotes" type="text" placeholder="Тактичні примітки (наприклад, заміновано ТМ-62)" class="text-field" />
+                    </div>
+
+                    <div class="fib-actions">
+                        <button type="button" class="btn-reset-overrides" @click="resetFeatureOverrides">Скинути до базових</button>
+                        <button type="button" class="btn-save-feature" :disabled="savingFeature" @click="saveCurrentFeature">
+                            {{ savingFeature ? 'ЗБЕРЕЖЕННЯ...' : 'ЗБЕРЕГТИ ОБ\'ЄКТ' }}
+                        </button>
                     </div>
                 </div>
             </div>
 
             <!-- Right Dynamic Accordion Sidebar -->
-            <div class="inspector-sidebar">
+            <aside class="inspector-sidebar">
                 <div class="accordion-container">
 
                     <!-- ACCORDION BLOCK 1: ELEVATION SCULPTING (Visible only if Elevation layer is ON) -->
                     <div v-if="layerStack.elevation" class="accordion-card">
-                        <div class="acc-header" @click="accordionOpen.elevation = !accordionOpen.elevation">
+                        <div class="acc-header" role="button" tabindex="0" @click="accordionOpen.elevation = !accordionOpen.elevation">
                             <span class="acc-title">⛰️ СТУДІЯ РЕЛЬЄФУ ТА СКУЛЬПТИНГ</span>
                             <span class="acc-arrow">{{ accordionOpen.elevation ? '▲' : '▼' }}</span>
                         </div>
@@ -106,11 +179,11 @@
                                     <strong class="val-badge">{{ terrainScale }}x</strong>
                                 </div>
                                 <input
+                                    v-model.number="terrainScale"
                                     type="range"
                                     min="1"
                                     max="5"
                                     step="0.5"
-                                    v-model.number="terrainScale"
                                     class="range-slider"
                                     @input="onTerrainScaleChange"
                                 />
@@ -149,7 +222,7 @@
                                     <span>Радіус дії:</span>
                                     <strong class="val-badge">{{ brushRadius }} м</strong>
                                 </div>
-                                <input type="range" min="20" max="400" step="10" v-model.number="brushRadius" class="range-slider" />
+                                <input v-model.number="brushRadius" type="range" min="20" max="400" step="10" class="range-slider" />
                             </div>
 
                             <div class="slider-group">
@@ -157,7 +230,7 @@
                                     <span>Глибина / Висота (&Delta;h):</span>
                                     <strong class="val-badge">{{ brushDelta }} м</strong>
                                 </div>
-                                <input type="range" min="5" max="100" step="5" v-model.number="brushDelta" class="range-slider" />
+                                <input v-model.number="brushDelta" type="range" min="5" max="100" step="5" class="range-slider" />
                             </div>
 
                             <div v-if="sculptLoading" class="sculpt-status-box">
@@ -168,7 +241,7 @@
 
                     <!-- ACCORDION BLOCK 2: BASEMAP TEXTURES (Visible only if Textures layer is ON) -->
                     <div v-if="layerStack.texture" class="accordion-card">
-                        <div class="acc-header" @click="accordionOpen.texture = !accordionOpen.texture">
+                        <div class="acc-header" role="button" tabindex="0" @click="accordionOpen.texture = !accordionOpen.texture">
                             <span class="acc-title">🗺️ ПІДКЛАДКА ТА ТЕКСТУРИ</span>
                             <span class="acc-arrow">{{ accordionOpen.texture ? '▲' : '▼' }}</span>
                         </div>
@@ -179,6 +252,7 @@
                                 <button
                                     v-for="l in map.layers"
                                     :key="l.id"
+                                    type="button"
                                     class="composite-layer-btn"
                                     :class="{ active: currentLayerType === l.layerType }"
                                     @click="switchBaseLayerType(l.layerType)"
@@ -191,10 +265,10 @@
 
                     <!-- ACCORDION BLOCK 3: OBJECTS & VECTORS (Visible only if Objects layer is ON) -->
                     <div v-if="layerStack.objects" class="accordion-card">
-                        <div class="acc-header" @click="accordionOpen.objects = !accordionOpen.objects">
+                        <div class="acc-header" role="button" tabindex="0" @click="accordionOpen.objects = !accordionOpen.objects">
                             <div class="title-with-btn">
-                                <span class="acc-title">🏘️ ВЕКТОРНІ ОБ'ЄКТИ ТА ТТХ</span>
-                                <button class="btn-add-mini" @click.stop="showAddModal = true">+ ДОДАТИ</button>
+                                <span class="acc-title">🏘️ КАТЕГОРІЇ ТА ШАБЛОНИ ТТХ</span>
+                                <button type="button" class="btn-add-mini" @click.stop="showAddModal = true">+ ДОДАТИ</button>
                             </div>
                             <span class="acc-arrow">{{ accordionOpen.objects ? '▲' : '▼' }}</span>
                         </div>
@@ -202,8 +276,9 @@
                         <div v-show="accordionOpen.objects" class="acc-body">
                             <div class="category-filters">
                                 <button
-                                    v-for="cat in ['ALL', 'ROAD', 'VEGETATION', 'BUILDING', 'WATER', 'SOIL']"
+                                    v-for="cat in (['ALL', 'ROAD', 'VEGETATION', 'BUILDING', 'WATER', 'SOIL'] as const)"
                                     :key="cat"
+                                    type="button"
                                     class="filter-pill"
                                     :class="{ active: selectedCategory === cat }"
                                     @click="selectedCategory = cat"
@@ -218,35 +293,58 @@
                                     :key="mod.id"
                                     class="modifier-card"
                                     :class="{ highlighted: activeHighlightType === mod.osmValue }"
+                                    role="button"
+                                    tabindex="0"
                                     @click="highlightObjectsOnMap(mod)"
                                 >
                                     <div class="card-head">
                                         <span class="cat-badge" :class="mod.category.toLowerCase()">{{ mod.category }}</span>
                                         <span class="tag-label">{{ mod.osmKey }}={{ mod.osmValue }}</span>
                                     </div>
-                                    <div class="mod-desc">{{ mod.description || 'Об’єкт місцевості' }}</div>
+                                    <div class="mod-desc">{{ mod.description || 'Не налаштовано (призначте шаблон)' }}</div>
+
+                                    <!-- Quick Template Selector from Global Library -->
+                                    <div class="template-selector-row" @click.stop>
+                                        <label>ПРИЗНАЧИТИ ШАБЛОН:</label>
+                                        <div class="select-with-btn">
+                                            <select v-model="selectedTemplateForMod[mod.id]" class="template-dropdown">
+                                                <option value="">-- Оберіть шаблон із довідника --</option>
+                                                <option v-for="t in availableTemplates" :key="t.id" :value="t.id">
+                                                    {{ t.description }} ({{ t.category }})
+                                                </option>
+                                            </select>
+                                            <button
+                                                type="button"
+                                                class="btn-apply-tmpl"
+                                                :disabled="!selectedTemplateForMod[mod.id]"
+                                                @click="applyTemplateToCategory(mod, selectedTemplateForMod[mod.id])"
+                                            >
+                                                ЗАСТОСУВАТИ
+                                            </button>
+                                        </div>
+                                    </div>
 
                                     <div class="params-grid" @click.stop>
                                         <div class="param-box">
                                             <label>Шв. Колісні:</label>
-                                            <input type="number" step="0.05" min="0" max="1.5" v-model.number="mod.speedModifierWheeled" class="num-field" />
+                                            <input v-model.number="mod.speedModifierWheeled" type="number" step="0.05" min="0" max="1.5" class="num-field" />
                                         </div>
                                         <div class="param-box">
                                             <label>Шв. Гусеничні:</label>
-                                            <input type="number" step="0.05" min="0" max="1.5" v-model.number="mod.speedModifierTracked" class="num-field" />
+                                            <input v-model.number="mod.speedModifierTracked" type="number" step="0.05" min="0" max="1.5" class="num-field" />
                                         </div>
                                         <div class="param-box">
                                             <label>Видимість (м):</label>
-                                            <input type="number" step="10" min="0" max="5000" v-model.number="mod.visibilityMeters" placeholder="Без меж" class="num-field" />
+                                            <input v-model.number="mod.visibilityMeters" type="number" step="10" min="0" max="5000" placeholder="Без меж" class="num-field" />
                                         </div>
                                         <div class="param-box">
                                             <label>Захист (%):</label>
-                                            <input type="number" step="5" min="0" max="95" v-model.number="mod.coverDefensePercent" class="num-field" />
+                                            <input v-model.number="mod.coverDefensePercent" type="number" step="5" min="0" max="95" class="num-field" />
                                         </div>
                                     </div>
 
                                     <div class="card-actions" @click.stop>
-                                        <button class="btn-save-mod" @click="saveModifier(mod)">ЗБЕРЕГТИ ТТХ</button>
+                                        <button type="button" class="btn-save-mod" @click="saveModifier(mod)">ЗБЕРЕГТИ КАТЕГОРІЮ</button>
                                     </div>
                                 </div>
                             </div>
@@ -259,18 +357,18 @@
                     </div>
 
                 </div>
-            </div>
+            </aside>
         </div>
 
         <!-- Modal to Add New Custom Object -->
-        <div v-if="showAddModal" class="modal-overlay">
+        <div v-if="showAddModal" class="modal-overlay" role="dialog" aria-modal="true" @click.self="showAddModal = false">
             <div class="modal-box">
                 <div class="modal-head">
                     <h4>ДОДАТИ НОВИЙ ТИП ОБ'ЄКТА / ПОКРИТТЯ</h4>
-                    <button class="btn-close-modal" @click="showAddModal = false">✕</button>
+                    <button type="button" class="btn-close-modal" aria-label="Close" @click="showAddModal = false">✕</button>
                 </div>
 
-                <form @submit.prevent="createNewModifier" class="modal-form">
+                <form class="modal-form" @submit.prevent="createNewModifier">
                     <div class="form-row">
                         <label>КАТЕГОРІЯ ОБ'ЄКТА:</label>
                         <select v-model="newMod.category" required>
@@ -334,6 +432,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import {
     Viewer,
+    Cartesian2,
     Cartesian3,
     Rectangle,
     UrlTemplateImageryProvider,
@@ -348,13 +447,40 @@ import {
     CallbackProperty,
     CallbackPositionProperty,
     ColorMaterialProperty,
+    ConstantProperty,
+    EllipsoidTerrainProvider,
     HeightReference,
     CustomHeightmapTerrainProvider,
     GeographicTilingScheme,
-    defined
+    defined,
+    Material,
+    Entity
 } from 'cesium';
-import { mapApi } from '../mapApi';
-import type { MapDetailDto, SurfaceModifierDto } from '../types';
+import { mapApi } from '@/modules/map-studio/mapApi';
+import type {
+    MapDetailDto,
+    SurfaceModifierDto,
+    SculptOperation,
+    ModifierCategory,
+    FeatureStatus, DefaultModifierDto
+} from '@/modules/map-studio/types';
+
+interface InspectedFeatureState {
+    id: string;
+    osmId?: number | null;
+    name: string;
+    category: string;
+    typeKey: string;
+    typeValue: string;
+    status: FeatureStatus;
+    isCustomModified: boolean;
+    speedOverrideWheeled: number | null;
+    speedOverrideTracked: number | null;
+    visibilityOverride: number | null;
+    coverOverride: number | null;
+    customNotes: string;
+    cesiumEntity?: Entity;
+}
 
 const props = defineProps<{
     map: MapDetailDto;
@@ -385,11 +511,13 @@ const selectedCategory = ref<string>('ALL');
 const modifiers = ref<SurfaceModifierDto[]>([]);
 const showAddModal = ref(false);
 const activeHighlightType = ref<string | null>(null);
-const inspectedFeature = ref<any | null>(null);
+const inspectedFeature = ref<InspectedFeatureState | null>(null);
 const centerAltitudeDisplay = ref<number>(120);
+const savingFeature = ref(false);
+const selectedTemplateForMod = reactive<Record<string, string>>({});
 
 // Sculpting state
-const sculptOp = ref<'DIG' | 'RAISE' | 'FLATTEN'>('DIG');
+const sculptOp = ref<SculptOperation>('DIG');
 const brushRadius = ref(100);
 const brushDelta = ref(30);
 const sculptLoading = ref(false);
@@ -398,7 +526,6 @@ let viewer: Viewer | null = null;
 let handler: ScreenSpaceEventHandler | null = null;
 let vectorDataSource: GeoJsonDataSource | null = null;
 let currentImageryLayer: ImageryLayer | null = null;
-
 let currentMousePosition: Cartesian3 | null = null;
 
 const newMod = ref<Partial<SurfaceModifierDto>>({
@@ -413,38 +540,41 @@ const newMod = ref<Partial<SurfaceModifierDto>>({
 });
 
 const geoTilingScheme = new GeographicTilingScheme();
-
 const terrainScale = ref(2.5);
 
 const onTerrainScaleChange = () => {
     if (!viewer) return;
-    (viewer.scene as any).verticalExaggeration = terrainScale.value;
+    (viewer.scene as unknown as { verticalExaggeration: number }).verticalExaggeration = terrainScale.value;
 };
 
-/**
- * Builds dynamic 3D geometry directly from local server's terrain.tif
- */
+// Fast in-memory cache to prevent spamming backend with duplicate grid queries
+const terrainGridCache = new Map<string, Float32Array>();
+
 const createLocalTerrainProvider = () => {
     return new CustomHeightmapTerrainProvider({
         width: 32,
         height: 32,
         tilingScheme: geoTilingScheme,
         callback: async (x: number, y: number, level: number) => {
-            const rect = geoTilingScheme.tileXYToRectangle(x, y, level);
+            const cacheKey = `${level}_${x}_${y}`;
+            if (terrainGridCache.has(cacheKey)) {
+                return terrainGridCache.get(cacheKey)!;
+            }
 
+            const rect = geoTilingScheme.tileXYToRectangle(x, y, level);
             const minLat = CesiumMath.toDegrees(rect.south);
             const maxLat = CesiumMath.toDegrees(rect.north);
             const minLon = CesiumMath.toDegrees(rect.west);
             const maxLon = CesiumMath.toDegrees(rect.east);
 
-            const url = `http://localhost:8080/api/maps/${props.map.id}/terrain/grid?minLat=${minLat}&maxLat=${maxLat}&minLon=${minLon}&maxLon=${maxLon}&width=32&height=32`;
+            const url = `/api/maps/${props.map.id}/terrain/grid?minLat=${minLat}&maxLat=${maxLat}&minLon=${minLon}&maxLon=${maxLon}&width=32&height=32`;
 
             try {
                 const response = await fetch(url);
                 if (!response.ok) return new Float32Array(32 * 32).fill(120.0);
                 const buffer = await response.arrayBuffer();
                 const floatArray = new Float32Array(buffer);
-                // Sample center altitude for display
+                terrainGridCache.set(cacheKey, floatArray);
                 centerAltitudeDisplay.value = Math.round(floatArray[512] || 120.0);
                 return floatArray;
             } catch {
@@ -454,10 +584,41 @@ const createLocalTerrainProvider = () => {
     });
 };
 
+const availableTemplates = ref<DefaultModifierDto[]>([]);
+
+const loadAvailableTemplates = async () => {
+    try {
+        availableTemplates.value = await mapApi.getTemplates();
+    } catch (err) {
+        console.warn('Could not load global templates:', err);
+    }
+};
+
+// Shared static material singletons (Enables Cesium GPU draw-call batching)
+const MAT_ROAD_OPERATIONAL = new ColorMaterialProperty(Color.fromCssColorString('#f59e0b').withAlpha(0.9));
+const MAT_ROAD_DESTROYED = new ColorMaterialProperty(Color.fromCssColorString('#475569').withAlpha(0.6));
+const MAT_ROAD_MINED = new ColorMaterialProperty(Color.fromCssColorString('#dc2626').withAlpha(0.9));
+const MAT_ROAD_CHECKPOINT = new ColorMaterialProperty(Color.fromCssColorString('#f97316').withAlpha(0.95));
+
+const MAT_FOREST = new ColorMaterialProperty(Color.fromCssColorString('#15803d').withAlpha(0.55)); // Deep tactical green
+const MAT_MEADOW = new ColorMaterialProperty(Color.fromCssColorString('#65a30d').withAlpha(0.25)); // Olive meadow
+const MAT_SETTLEMENT = new ColorMaterialProperty(Color.fromCssColorString('#64748b').withAlpha(0.35)); // Gray village footprint
+const MAT_BUILDING = new ColorMaterialProperty(Color.fromCssColorString('#ef4444').withAlpha(0.7)); // Building footprint
+const MAT_WATER_LINE = new ColorMaterialProperty(Color.fromCssColorString('#0284c7').withAlpha(0.9));
+const MAT_WATER_POLYGON = new ColorMaterialProperty(Color.fromCssColorString('#0284c7').withAlpha(0.65));
+const MAT_RAILWAY = new ColorMaterialProperty(Color.fromCssColorString('#f8fafc').withAlpha(0.8));
+const MAT_SOIL = new ColorMaterialProperty(Color.fromCssColorString('#475569').withAlpha(0.2));
+
+// Shared constant properties for width & outline (Eliminates per-frame CPU callbacks)
+const CONST_WIDTH_ROAD = new ConstantProperty(3.5);
+const CONST_WIDTH_STREAM = new ConstantProperty(2.5);
+const CONST_WIDTH_RAILWAY = new ConstantProperty(2.0);
+const CONST_WIDTH_CHECKPOINT = new ConstantProperty(6.0);
+const CONST_OUTLINE_FALSE = new ConstantProperty(false);
+
 onMounted(async () => {
     if (!editorMapContainer.value) return;
 
-    // 1. Initialize Cesium Viewer with local terrain provider
     viewer = new Viewer(editorMapContainer.value, {
         baseLayer: false,
         terrainProvider: createLocalTerrainProvider(),
@@ -474,28 +635,20 @@ onMounted(async () => {
         skyBox: false
     });
 
-    // Set tactical terrain vertical exaggeration (2.5x by default so hills and valleys pop out!)
-    (viewer.scene as any).verticalExaggeration = 2.5;
-
-    // Enable lighting and slope shadows for realistic 3D depth
+    (viewer.scene as unknown as { verticalExaggeration: number }).verticalExaggeration = 2.5;
     viewer.scene.globe.enableLighting = true;
-
-    viewer.scene.globe.baseColor = Color.fromCssColorString('#064e3b');
+    viewer.scene.globe.baseColor = Color.fromCssColorString('#1e293b');
     if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
     viewer.scene.globe.showGroundAtmosphere = false;
     viewer.scene.backgroundColor = Color.fromCssColorString('#020617');
 
-    // 2. Clamp globe to the exact bounding box of this 20x20 km theater
     const theaterRect = Rectangle.fromDegrees(
         props.map.minLon, props.map.minLat, props.map.maxLon, props.map.maxLat
     );
     viewer.scene.globe.cartographicLimitRectangle = theaterRect;
-
-    // Zoom bounds: max zoom out is proportional to map size
     viewer.scene.screenSpaceCameraController.minimumZoomDistance = 80.0;
     viewer.scene.screenSpaceCameraController.maximumZoomDistance = Math.max(props.map.sizeKm * 1600.0, 26000.0);
 
-    // 3. Add clean boundary polyline around the 20x20km theater (replaces rectangle outline to prevent warnings)
     const boundaryCorners = [
         Cartesian3.fromDegrees(props.map.minLon, props.map.minLat),
         Cartesian3.fromDegrees(props.map.maxLon, props.map.minLat),
@@ -516,17 +669,38 @@ onMounted(async () => {
     setupBrushCursor();
     setupMouseInteractions();
 
-    // 4. Initial Camera: 2D view
     fitCamera(false);
 
-    // Load vector features and initial imagery
     await loadVectorFeatures();
     if (props.map.layers && props.map.layers.length > 0) {
         currentLayerType.value = props.map.layers[0].layerType;
     }
     applyLayerStack();
     await loadModifiers();
+    await loadAvailableTemplates();
 });
+
+const applyTemplateToCategory = async (mod: SurfaceModifierDto, templateId: string) => {
+    if (!templateId) return;
+    try {
+        await mapApi.applyTemplateToMap(props.map.id, templateId);
+        await loadModifiers();
+        alert(`Шаблон успішно застосовано до типу: ${mod.osmValue}`);
+    } catch (err) {
+        alert('Помилка застосування шаблону: ' + err);
+    }
+};
+
+const applyTemplateToSelectedFeature = (templateId: string) => {
+    if (!inspectedFeature.value || !templateId) return;
+    const tmpl = availableTemplates.value.find(t => t.id === templateId);
+    if (tmpl) {
+        inspectedFeature.value.speedOverrideWheeled = tmpl.speedModifierWheeled;
+        inspectedFeature.value.speedOverrideTracked = tmpl.speedModifierTracked;
+        inspectedFeature.value.visibilityOverride = tmpl.visibilityMeters;
+        inspectedFeature.value.coverOverride = tmpl.coverDefensePercent;
+    }
+};
 
 const fitCamera = (is3d: boolean) => {
     if (!viewer) return;
@@ -535,12 +709,13 @@ const fitCamera = (is3d: boolean) => {
         props.map.minLon, props.map.minLat, props.map.maxLon, props.map.maxLat
     );
 
-    // Unlocked drag navigation
     viewer.scene.screenSpaceCameraController.enableRotate = true;
     viewer.scene.screenSpaceCameraController.enableTranslate = true;
     viewer.scene.screenSpaceCameraController.enableZoom = true;
 
     if (!is3d) {
+        // 2D MODE: Use flat terrain provider (zero HTTP calls, flawless 60 FPS)
+        viewer.terrainProvider = new EllipsoidTerrainProvider();
         viewer.scene.screenSpaceCameraController.enableTilt = false;
         viewer.camera.flyTo({
             destination: theaterRect,
@@ -552,6 +727,8 @@ const fitCamera = (is3d: boolean) => {
             duration: 0.8
         });
     } else {
+        // 3D MODE: Mount DEM heightmap
+        viewer.terrainProvider = createLocalTerrainProvider();
         viewer.scene.screenSpaceCameraController.enableTilt = true;
         viewer.camera.flyTo({
             destination: Cartesian3.fromDegrees(
@@ -579,27 +756,23 @@ const toggleLayer = (layerKey: 'elevation' | 'texture' | 'objects') => {
     applyLayerStack();
 };
 
-/**
- * Updates Cesium scene with comprehensive hypsometric color scale starting from 0 meters (Mukachevo lowland support)
- */
-const applyLayerStack = async () => {
+const applyLayerStack = () => {
     if (!viewer) return;
 
-    // 1. Elevation Layer: Complete Ukrainian hypsometric spectrum from 0m to 1500m
     if (layerStack.elevation && !layerStack.texture) {
         const bands = [
             {
                 entries: [
-                    { height: 0.0, color: Color.fromCssColorString('#022c22') },    // 0m (lowlands)
-                    { height: 90.0, color: Color.fromCssColorString('#047857') },   // 90m (valleys)
-                    { height: 130.0, color: Color.fromCssColorString('#059669') },  // 130m (Mukachevo plain)
-                    { height: 200.0, color: Color.fromCssColorString('#10b981') },  // 200m (meadows)
-                    { height: 300.0, color: Color.fromCssColorString('#84cc16') },  // 300m (volcanic hills)
-                    { height: 450.0, color: Color.fromCssColorString('#facc15') },  // 450m (pre-Carpathians)
-                    { height: 650.0, color: Color.fromCssColorString('#f97316') },  // 650m (mid mountains)
-                    { height: 900.0, color: Color.fromCssColorString('#dc2626') },  // 900m (Carpathian ridge)
-                    { height: 1200.0, color: Color.fromCssColorString('#78350f') }, // 1200m (peaks)
-                    { height: 1600.0, color: Color.fromCssColorString('#f8fafc') }  // 1600m (high peaks)
+                    { height: 0.0, color: Color.fromCssColorString('#022c22') },
+                    { height: 90.0, color: Color.fromCssColorString('#047857') },
+                    { height: 130.0, color: Color.fromCssColorString('#059669') },
+                    { height: 200.0, color: Color.fromCssColorString('#10b981') },
+                    { height: 300.0, color: Color.fromCssColorString('#84cc16') },
+                    { height: 450.0, color: Color.fromCssColorString('#facc15') },
+                    { height: 650.0, color: Color.fromCssColorString('#f97316') },
+                    { height: 900.0, color: Color.fromCssColorString('#dc2626') },
+                    { height: 1200.0, color: Color.fromCssColorString('#78350f') },
+                    { height: 1600.0, color: Color.fromCssColorString('#f8fafc') }
                 ]
             }
         ];
@@ -608,10 +781,9 @@ const applyLayerStack = async () => {
             layers: bands
         });
     } else {
-        viewer.scene.globe.material = undefined as any;
+        viewer.scene.globe.material = undefined as unknown as Material;
     }
 
-    // 2. Texture Layer
     if (layerStack.texture) {
         mountBaseLayer(currentLayerType.value);
     } else {
@@ -621,7 +793,6 @@ const applyLayerStack = async () => {
         }
     }
 
-    // 3. Objects Layer
     if (vectorDataSource) {
         vectorDataSource.show = layerStack.objects;
     }
@@ -634,10 +805,11 @@ const mountBaseLayer = (layerType: string) => {
         currentImageryLayer = null;
     }
 
-    const tileUrl = `http://localhost:8080/api/maps/${props.map.id}/tiles/${layerType.toLowerCase()}/{z}/{x}/{y}.png`;
+    const tileUrl = `/api/maps/${props.map.id}/tiles/${layerType.toLowerCase()}/{z}/{x}/{y}.png`;
     const layerMeta = props.map.layers?.find(l => l.layerType.toUpperCase() === layerType.toUpperCase());
-    const minZ = layerMeta ? layerMeta.minZoom : 10;
-    const maxZ = layerMeta ? layerMeta.maxZoom : 16;
+    const minZ = layerMeta ? layerMeta.minZoom : 8;
+    // Allow Cesium to request crystal-clear street-level tiles up to Zoom 19 (Google HD)
+    const maxZ = 19;
 
     const provider = new UrlTemplateImageryProvider({
         url: tileUrl,
@@ -674,10 +846,8 @@ const setupBrushCursor = () => {
                     return c.withAlpha(0.35);
                 }, false)
             ),
-            outline: true,
-            outlineColor: Color.WHITE,
             heightReference: HeightReference.CLAMP_TO_GROUND,
-            show: new CallbackProperty(() => layerStack.elevation && currentMousePosition !== null, false) as any
+            show: new CallbackProperty(() => layerStack.elevation && currentMousePosition !== null, false)
         }
     });
 };
@@ -686,7 +856,7 @@ const setupMouseInteractions = () => {
     if (!viewer) return;
     handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 
-    handler.setInputAction((movement: any) => {
+    handler.setInputAction((movement: { endPosition: Cartesian2 }) => {
         if (!layerStack.elevation) return;
         const ray = viewer!.camera.getPickRay(movement.endPosition);
         if (!ray) return;
@@ -694,9 +864,9 @@ const setupMouseInteractions = () => {
         if (cartesian) currentMousePosition = cartesian;
     }, ScreenSpaceEventType.MOUSE_MOVE);
 
-    handler.setInputAction(async (click: any) => {
+    handler.setInputAction(async (event: { position: Cartesian2 }) => {
         if (layerStack.elevation) {
-            const ray = viewer!.camera.getPickRay(click.position);
+            const ray = viewer!.camera.getPickRay(event.position);
             if (!ray) return;
             const cartesian = viewer!.scene.globe.pick(ray, viewer!.scene);
             if (!cartesian) return;
@@ -714,22 +884,34 @@ const setupMouseInteractions = () => {
                     operation: sculptOp.value,
                     deltaMeters: brushDelta.value
                 });
-                // Re-mount local terrain provider to trigger dynamic 3D deformation
                 viewer!.terrainProvider = createLocalTerrainProvider();
-            } catch (err: any) {
-                alert('Помилка скульптингу: ' + err.message);
+            } catch (err: unknown) {
+                const message = err instanceof Error ? err.message : String(err);
+                alert('Помилка скульптингу: ' + message);
             } finally {
                 sculptLoading.value = false;
             }
         } else if (layerStack.objects) {
-            const picked = viewer!.scene.pick(click.position);
+            const picked = viewer!.scene.pick(event.position);
             if (defined(picked) && picked.id && picked.id.properties) {
                 const p = picked.id.properties;
+                const featureId = p.id ? String(p.id.getValue()) : '';
+
                 inspectedFeature.value = {
+                    id: featureId,
+                    osmId: p.osmId ? Number(p.osmId.getValue()) : null,
                     name: p.name ? p.name.getValue() : 'Об’єкт без назви',
                     category: p.category ? p.category.getValue() : 'UNKNOWN',
                     typeKey: p.typeKey ? p.typeKey.getValue() : '',
-                    typeValue: p.typeValue ? p.typeValue.getValue() : ''
+                    typeValue: p.typeValue ? p.typeValue.getValue() : '',
+                    status: (p.status ? p.status.getValue() : 'OPERATIONAL') as FeatureStatus,
+                    isCustomModified: p.isCustomModified ? Boolean(p.isCustomModified.getValue()) : false,
+                    speedOverrideWheeled: p.speedOverrideWheeled ? Number(p.speedOverrideWheeled.getValue()) : null,
+                    speedOverrideTracked: p.speedOverrideTracked ? Number(p.speedOverrideTracked.getValue()) : null,
+                    visibilityOverride: p.visibilityOverride ? Number(p.visibilityOverride.getValue()) : null,
+                    coverOverride: p.coverOverride ? Number(p.coverOverride.getValue()) : null,
+                    customNotes: p.customNotes ? String(p.customNotes.getValue()) : '',
+                    cesiumEntity: picked.id
                 };
                 activeHighlightType.value = inspectedFeature.value.typeValue;
             } else {
@@ -745,6 +927,73 @@ const clearInspection = () => {
     resetMapHighlights();
 };
 
+const applyEntityStyling = (entity: Entity) => {
+    const category = entity.properties?.category?.getValue();
+    const status = entity.properties?.status?.getValue() as FeatureStatus | undefined;
+    const typeKey = entity.properties?.typeKey?.getValue();
+    const typeValue = entity.properties?.typeValue?.getValue();
+
+    // 1. ROADS
+    if (category === 'ROAD' && entity.polyline) {
+        if (typeKey === 'railway') {
+            entity.polyline.material = MAT_RAILWAY;
+            entity.polyline.width = CONST_WIDTH_RAILWAY;
+            return;
+        }
+        if (status === 'DESTROYED') entity.polyline.material = MAT_ROAD_DESTROYED;
+        else if (status === 'MINED') entity.polyline.material = MAT_ROAD_MINED;
+        else if (status === 'CHECKPOINT') {
+            entity.polyline.material = MAT_ROAD_CHECKPOINT;
+            entity.polyline.width = CONST_WIDTH_CHECKPOINT;
+            return;
+        } else {
+            entity.polyline.material = MAT_ROAD_OPERATIONAL;
+        }
+        entity.polyline.width = CONST_WIDTH_ROAD;
+        return;
+    }
+
+    // 2. WATER
+    if (category === 'WATER') {
+        if (entity.polyline) {
+            entity.polyline.material = MAT_WATER_LINE;
+            entity.polyline.width = CONST_WIDTH_STREAM;
+        } else if (entity.polygon) {
+            entity.polygon.material = MAT_WATER_POLYGON;
+            entity.polygon.outline = CONST_OUTLINE_FALSE as any;
+        }
+        return;
+    }
+
+    // 3. VEGETATION & LANDUSE
+    if (category === 'VEGETATION' && entity.polygon) {
+        if (typeValue === 'wood' || typeValue === 'forest') {
+            entity.polygon.material = MAT_FOREST;
+        } else {
+            entity.polygon.material = MAT_MEADOW;
+        }
+        entity.polygon.outline = CONST_OUTLINE_FALSE as any;
+        return;
+    }
+
+    // 4. BUILDINGS & VILLAGE ZONES
+    if (category === 'BUILDING' && entity.polygon) {
+        if (typeValue === 'residential' || typeValue === 'industrial') {
+            entity.polygon.material = MAT_SETTLEMENT;
+        } else {
+            entity.polygon.material = MAT_BUILDING;
+        }
+        entity.polygon.outline = CONST_OUTLINE_FALSE as any;
+        return;
+    }
+
+    // 5. DEFAULT OPEN GROUND
+    if (entity.polygon) {
+        entity.polygon.material = MAT_SOIL;
+        entity.polygon.outline = CONST_OUTLINE_FALSE as any;
+    }
+};
+
 const loadVectorFeatures = async () => {
     if (!viewer) return;
     try {
@@ -756,32 +1005,33 @@ const loadVectorFeatures = async () => {
 
         const entities = vectorDataSource.entities.values;
         for (const entity of entities) {
-            const category = entity.properties?.category?.getValue();
-            if (category === 'ROAD' && entity.polyline) {
-                entity.polyline.material = Color.fromCssColorString('#f59e0b').withAlpha(0.8) as any;
-                entity.polyline.width = 4 as any;
-            } else if (category === 'VEGETATION' && entity.polygon) {
-                entity.polygon.material = Color.fromCssColorString('#10b981').withAlpha(0.3) as any;
-            } else if (category === 'BUILDING' && entity.polygon) {
-                entity.polygon.material = Color.fromCssColorString('#ef4444').withAlpha(0.4) as any;
-            }
+            applyEntityStyling(entity);
         }
         viewer.dataSources.add(vectorDataSource);
-    } catch (err) {}
+    } catch (err: unknown) {
+        console.warn('[TALOS STUDIO] Could not load vector features:', err);
+    }
 };
 
 const highlightObjectsOnMap = (mod: SurfaceModifierDto) => {
     if (!vectorDataSource) return;
     activeHighlightType.value = mod.osmValue;
+    const highlightMaterial = new ColorMaterialProperty(Color.CYAN);
+    const highlightWidth = new ConstantProperty(6);
+
     const entities = vectorDataSource.entities.values;
     for (const entity of entities) {
         const isMatch = (entity.properties?.typeValue?.getValue() === mod.osmValue);
-        if (entity.polyline) {
-            entity.polyline.material = (isMatch ? Color.CYAN : Color.fromCssColorString('#f59e0b').withAlpha(0.2)) as any;
-            entity.polyline.width = (isMatch ? 8 : 2) as any;
-        }
-        if (entity.polygon) {
-            entity.polygon.material = (isMatch ? Color.CYAN.withAlpha(0.7) : Color.fromCssColorString('#10b981').withAlpha(0.1)) as any;
+        if (isMatch) {
+            if (entity.polyline) {
+                entity.polyline.material = highlightMaterial;
+                entity.polyline.width = highlightWidth;
+            }
+            if (entity.polygon) {
+                entity.polygon.material = highlightMaterial;
+            }
+        } else {
+            applyEntityStyling(entity);
         }
     }
 };
@@ -790,25 +1040,66 @@ const resetMapHighlights = () => {
     if (!vectorDataSource) return;
     const entities = vectorDataSource.entities.values;
     for (const entity of entities) {
-        const cat = entity.properties?.category?.getValue();
-        if (cat === 'ROAD' && entity.polyline) {
-            entity.polyline.material = Color.fromCssColorString('#f59e0b').withAlpha(0.8) as any;
-            entity.polyline.width = 4 as any;
-        } else if (entity.polygon) {
-            entity.polygon.material = Color.fromCssColorString('#10b981').withAlpha(0.3) as any;
-        }
+        applyEntityStyling(entity);
     }
 };
 
 const inspectedModifier = computed(() => {
     if (!inspectedFeature.value) return null;
-    return modifiers.value.find(m => m.osmValue === inspectedFeature.value.typeValue) || null;
+    return modifiers.value.find(m => m.osmValue === inspectedFeature.value?.typeValue) || null;
 });
+
+const defaultSpeedWheeled = computed(() => inspectedModifier.value ? String(inspectedModifier.value.speedModifierWheeled) : '1.0');
+const defaultSpeedTracked = computed(() => inspectedModifier.value ? String(inspectedModifier.value.speedModifierTracked) : '1.0');
+const defaultCoverDefense = computed(() => inspectedModifier.value ? String(inspectedModifier.value.coverDefensePercent) : '0');
+const defaultVisibility = computed(() => (inspectedModifier.value?.visibilityMeters) ? String(inspectedModifier.value.visibilityMeters) : 'Без меж');
+
+const resetFeatureOverrides = () => {
+    if (!inspectedFeature.value) return;
+    inspectedFeature.value.speedOverrideWheeled = null;
+    inspectedFeature.value.speedOverrideTracked = null;
+    inspectedFeature.value.coverOverride = null;
+    inspectedFeature.value.visibilityOverride = null;
+    inspectedFeature.value.status = 'OPERATIONAL';
+};
+
+const saveCurrentFeature = async () => {
+    if (!inspectedFeature.value || !inspectedFeature.value.id) return;
+    try {
+        savingFeature.value = true;
+        await mapApi.updateFeature(props.map.id, inspectedFeature.value.id, {
+            name: inspectedFeature.value.name,
+            status: inspectedFeature.value.status,
+            speedModifierOverrideWheeled: inspectedFeature.value.speedOverrideWheeled,
+            speedModifierOverrideTracked: inspectedFeature.value.speedOverrideTracked,
+            visibilityOverride: inspectedFeature.value.visibilityOverride,
+            coverDefenseOverride: inspectedFeature.value.coverOverride,
+            customNotes: inspectedFeature.value.customNotes
+        });
+
+        // Update Cesium entity state dynamically without full reload
+        if (inspectedFeature.value.cesiumEntity && inspectedFeature.value.cesiumEntity.properties) {
+            inspectedFeature.value.cesiumEntity.properties.status = inspectedFeature.value.status;
+            inspectedFeature.value.cesiumEntity.properties.name = inspectedFeature.value.name;
+            applyEntityStyling(inspectedFeature.value.cesiumEntity);
+        }
+
+        inspectedFeature.value.isCustomModified = true;
+        alert(`Збережено індивідуальні параметри для: "${inspectedFeature.value.name}"`);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        alert('Помилка збереження об\'єкта: ' + message);
+    } finally {
+        savingFeature.value = false;
+    }
+};
 
 const loadModifiers = async () => {
     try {
         modifiers.value = await mapApi.getModifiers(props.map.id);
-    } catch (err) {}
+    } catch (err: unknown) {
+        console.warn('[TALOS STUDIO] Could not load modifiers:', err);
+    }
 };
 
 watch(() => props.map.id, loadModifiers);
@@ -821,9 +1112,10 @@ const filteredModifiers = computed(() => {
 const saveModifier = async (mod: SurfaceModifierDto) => {
     try {
         await mapApi.updateModifier(props.map.id, mod);
-        alert(`Оновлено ТТХ: ${mod.osmKey}=${mod.osmValue}`);
-    } catch (err: any) {
-        alert('Помилка: ' + err.message);
+        alert(`Оновлено ТТХ категорії: ${mod.osmKey}=${mod.osmValue}`);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        alert('Помилка: ' + message);
     }
 };
 
@@ -831,7 +1123,7 @@ const createNewModifier = async () => {
     if (!newMod.value.osmKey || !newMod.value.osmValue) return;
     const created: SurfaceModifierDto = {
         id: crypto.randomUUID(),
-        category: newMod.value.category as any,
+        category: (newMod.value.category || 'BUILDING') as ModifierCategory,
         osmKey: newMod.value.osmKey,
         osmValue: newMod.value.osmValue,
         description: newMod.value.description || '',
@@ -844,8 +1136,9 @@ const createNewModifier = async () => {
         await mapApi.updateModifier(props.map.id, created);
         modifiers.value.push(created);
         showAddModal.value = false;
-    } catch (err: any) {
-        alert('Помилка: ' + err.message);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        alert('Помилка: ' + message);
     }
 };
 
@@ -975,27 +1268,97 @@ onUnmounted(() => {
 .sub-coords { font-size: 9px; color: #94a3b8; }
 .alt-text { color: #00e676; }
 
-/* Clicked Feature Inspection Banner */
+/* Clicked Feature Inspection Drawer */
 .feature-inspector-banner {
     position: absolute;
     bottom: 20px;
     left: 20px;
-    background: rgba(15, 23, 42, 0.95);
+    background: rgba(15, 23, 42, 0.97);
     border: 1px solid #f1c40f;
-    padding: 12px 16px;
+    padding: 14px 18px;
     border-radius: 6px;
     z-index: 10;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.8);
-    width: 380px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.85);
+    width: 420px;
     font-family: monospace;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
-.fib-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.fib-cat { font-size: 9px; padding: 2px 5px; border-radius: 2px; }
+.fib-header { display: flex; align-items: center; gap: 8px; }
+.fib-name-input {
+    flex: 1;
+    background: #0b1120;
+    border: 1px solid #334155;
+    color: #fff;
+    font-size: 11px;
+    font-family: monospace;
+    font-weight: bold;
+    padding: 4px 6px;
+    border-radius: 3px;
+}
+.fib-cat { font-size: 9px; padding: 2px 5px; border-radius: 2px; font-weight: bold; }
 .fib-cat.road { background: #1e3a8a; color: #93c5fd; }
 .fib-cat.vegetation { background: #064e3b; color: #6ee7b7; }
 .fib-cat.building { background: #7f1d1d; color: #fca5a5; }
-.fib-close { background: transparent; border: none; color: #94a3b8; cursor: pointer; }
-.fib-details { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #cbd5e1; }
+.fib-cat.water { background: #0c4a6e; color: #7dd3fc; }
+.fib-close { background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 14px; }
+
+.fib-status-row { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.status-select {
+    flex: 1;
+    background: #0b1120;
+    border: 1px solid #334155;
+    color: #fff;
+    padding: 5px;
+    font-size: 11px;
+    font-family: monospace;
+    border-radius: 3px;
+}
+.status-select.operational { border-color: #10b981; }
+.status-select.destroyed { border-color: #64748b; color: #94a3b8; }
+.status-select.mined { border-color: #ef4444; color: #f87171; font-weight: bold; }
+.status-select.checkpoint { border-color: #f97316; color: #fb923c; font-weight: bold; }
+
+.fib-meta { font-size: 10px; color: #64748b; display: flex; justify-content: space-between; align-items: center; }
+.custom-badge { background: #0284c7; color: #fff; font-size: 8px; padding: 2px 4px; border-radius: 2px; }
+
+.fib-overrides-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
+.override-field label { font-size: 9px; color: #94a3b8; display: block; margin-bottom: 2px; }
+.text-field {
+    width: 100%;
+    box-sizing: border-box;
+    background: #0b1120;
+    border: 1px solid #334155;
+    color: #fff;
+    padding: 5px;
+    font-size: 10px;
+    font-family: monospace;
+    border-radius: 2px;
+}
+
+.fib-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.btn-reset-overrides {
+    background: transparent;
+    border: 1px solid #475569;
+    color: #94a3b8;
+    padding: 4px 8px;
+    font-size: 9px;
+    cursor: pointer;
+    font-family: monospace;
+    border-radius: 3px;
+}
+.btn-save-feature {
+    background: #0284c7;
+    border: 1px solid #38bdf8;
+    color: #fff;
+    padding: 5px 14px;
+    font-size: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    font-family: monospace;
+    border-radius: 3px;
+}
 
 /* Right Inspector Sidebar */
 .inspector-sidebar {
@@ -1135,4 +1498,47 @@ select, input[type="text"], input[type="number"] {
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .btn-cancel { background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 5px 12px; font-size: 10px; cursor: pointer; }
 .btn-submit { background: #0284c7; border: 1px solid #38bdf8; color: #fff; padding: 5px 14px; font-size: 10px; cursor: pointer; font-weight: bold; }
+.template-selector-row {
+    margin: 6px 0 8px 0;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 6px;
+    border-radius: 3px;
+    border-left: 2px solid #00a8ff;
+}
+.template-selector-row label {
+    font-size: 8px;
+    color: #00a8ff;
+    font-family: monospace;
+    display: block;
+    margin-bottom: 3px;
+}
+.select-with-btn {
+    display: flex;
+    gap: 4px;
+}
+.template-dropdown {
+    flex: 1;
+    background: #0b1120;
+    border: 1px solid #334155;
+    color: #fff;
+    font-size: 10px;
+    font-family: monospace;
+    padding: 3px;
+    border-radius: 2px;
+}
+.btn-apply-tmpl {
+    background: #0284c7;
+    border: 1px solid #38bdf8;
+    color: #fff;
+    font-size: 9px;
+    font-weight: bold;
+    font-family: monospace;
+    padding: 3px 8px;
+    cursor: pointer;
+    border-radius: 2px;
+}
+.btn-apply-tmpl:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
 </style>

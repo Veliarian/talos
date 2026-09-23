@@ -1,16 +1,22 @@
-package com.talos.model.entity;
+package com.talos.gis.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
  * JPA Entity representing a bounded operational theater map.
  */
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
 @Entity
 @Table(name = "maps")
 public class MapEntity {
@@ -63,4 +69,31 @@ public class MapEntity {
 
     @OneToMany(mappedBy = "map", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<MapSurfaceModifierEntity> surfaceModifiers = new ArrayList<>();
+
+    public void addLayer(MapLayerEntity layer) {
+        layers.add(layer);
+        layer.setMap(this);
+    }
+
+    public void removeLayer(MapLayerEntity layer) {
+        layers.remove(layer);
+        layer.setMap(null);
+    }
+
+    public void addSurfaceModifier(MapSurfaceModifierEntity modifier) {
+        surfaceModifiers.add(modifier);
+        modifier.setMap(this);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof MapEntity that)) return false;
+        return id != null && Objects.equals(id, that.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

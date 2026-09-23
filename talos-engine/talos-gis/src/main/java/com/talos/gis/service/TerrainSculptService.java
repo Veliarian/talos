@@ -1,64 +1,55 @@
 package com.talos.gis.service;
 
+import com.talos.gis.dto.TerrainSculptRequest;
+import com.talos.gis.entity.MapEntity;
 import com.talos.gis.repository.MapRepository;
-import com.talos.model.dto.gis.TerrainSculptRequest;
-import com.talos.model.entity.MapEntity;
+import com.talos.gis.util.DemRaster;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.awt.image.WritableRaster;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.UUID;
 
 /**
- * Service handling mathematical elevation raster sculpting with self-healing capabilities.
- * Automatically recovers from 0-byte or corrupted DEM files by generating a valid baseline Float32 raster.
+ * Service handling interactive elevation raster sculpting (DIG, RAISE, FLATTEN)
+ * directly operating on 32-bit Float GeoTIFF matrices.
  */
 @Service
 public class TerrainSculptService {
 
     private static final Logger log = LoggerFactory.getLogger(TerrainSculptService.class);
+    private static final double METERS_PER_DEGREE = 111132.95;
 
     private final MapRepository mapRepository;
+    private final GisStorageService storageService;
 
-    @Value("${talos.storage.root:talos-data}")
-    private String storageRoot;
-
-    public TerrainSculptService(MapRepository mapRepository) {
+    public TerrainSculptService(MapRepository mapRepository, GisStorageService storageService) {
         this.mapRepository = mapRepository;
-    }
-
-    private Path resolvePath(String subPath) {
-        Path direct = Paths.get(storageRoot, subPath);
-        if (Files.exists(direct.getParent())) return direct;
-        Path parentRelative = Paths.get("../", storageRoot, subPath);
-        if (Files.exists(parentRelative.getParent())) return parentRelative;
-        return Paths.get("../../", storageRoot, subPath);
+        this.storageService = storageService;
     }
 
     /**
-     * Applies a brush sculpt operation (DIG, RAISE, FLATTEN) onto the map's elevation raster.
+     * Applies a radial brush sculpt operation onto the map's elevation raster.
+     *
+     * @param mapId   operational map UUID
+     * @param request sculpt parameters (center coordinates, radius, delta, operation)
+     * @return true altitude in meters at the center point after sculpting
      */
     public double sculptTerrain(UUID mapId, TerrainSculptRequest request) {
         MapEntity map = mapRepository.findById(mapId)
                 .orElseThrow(() -> new IllegalArgumentException("Map not found: " + mapId));
 
-        Path demPath = resolvePath(String.format("maps/%s/terrain.tif", mapId));
+        Path demPath = storageService.resolvePath(String.format("maps/%s/terrain.tif", mapId));
         File demFile = demPath.toFile();
 
+        if (!demFile.exists()) {
+            throw(new IllegalStateException("Elevation DEM raster file does not exist on disk: " + demPath));
+        }
+
         try {
-            com.talos.gis.util.DemRaster dem = com.talos.gis.util.DemRaster.readFromFile(demFile);
+            DemRaster dem = DemRaster.readFromFile(demFile);
 
             int width = dem.getWidth();
             int height = dem.getHeight();
@@ -68,11 +59,15 @@ public class TerrainSculptService {
             double minLon = map.getMinLon();
             double maxLon = map.getMaxLon();
 
-            int centerPxX = (int) ((request.centerLon() - minLon) / (maxLon - minLon) * (width - 1));
-            int centerPxY = (int) ((maxLat - request.centerLat()) / (maxLat - minLat) * (height - 1));
+            // Calculate pixel coordinate of sculpt center safely clamped inside bounds
+            int centerPxX = (int) Math.round((request.centerLon() - minLon) / (maxLon - minLon) * (width - 1));
+            int centerPxY = (int) Math.round((maxLat - request.centerLat()) / (maxLat - minLat) * (height - 1));
 
-            double mppY = (maxLat - minLat) * 111132.95 / height;
-            double mppX = (maxLon - minLon) * 111132.95 * Math.cos(Math.toRadians(request.centerLat())) / width;
+            centerPxX = Math.clamp(centerPxX, 0, width - 1);
+            centerPxY = Math.clamp(centerPxY, 0, height - 1);
+
+            double mppY = (maxLat - minLat) * METERS_PER_DEGREE / height;
+            double mppX = (maxLon - minLon) * METERS_PER_DEGREE * Math.cos(Math.toRadians(request.centerLat())) / width;
 
             double radius = request.radiusMeters();
             int radiusPxX = (int) Math.ceil(radius / mppX);
@@ -85,134 +80,41 @@ public class TerrainSculptService {
 
             float centerCurrentAlt = dem.getElevation(centerPxX, centerPxY);
             double delta = request.deltaMeters();
-            String op = request.operation().toUpperCase();
+            String operation = request.operation().toUpperCase();
 
             for (int y = startY; y <= endY; y++) {
                 for (int x = startX; x <= endX; x++) {
                     double distMeters = Math.hypot((x - centerPxX) * mppX, (y - centerPxY) * mppY);
 
                     if (distMeters <= radius) {
+                        // Smooth cosine falloff factor: 1.0 at center, tapering to 0.0 at edge
                         double falloff = 0.5 * (1.0 + Math.cos(Math.PI * distMeters / radius));
                         float currentAlt = dem.getElevation(x, y);
-                        float newAlt = currentAlt;
 
-                        switch (op) {
-                            case "DIG" -> newAlt = (float) (currentAlt - (delta * falloff));
-                            case "RAISE" -> newAlt = (float) (currentAlt + (delta * falloff));
-                            case "FLATTEN" -> newAlt = (float) (currentAlt * (1.0 - falloff) + centerCurrentAlt * falloff);
-                        }
+                        float newAlt = switch (operation) {
+                            case "DIG" -> (float) (currentAlt - (delta * falloff));
+                            case "RAISE" -> (float) (currentAlt + (delta * falloff));
+                            case "FLATTEN" -> (float) (currentAlt * (1.0 - falloff) + centerCurrentAlt * falloff);
+                            default -> currentAlt;
+                        };
 
                         dem.setElevation(x, y, newAlt);
                     }
                 }
             }
 
-            // Save modified raster directly without ImageIO clamping
+            // Write modified matrix directly back to disk
             dem.writeToFile(demFile);
 
             float finalCenterAlt = dem.getElevation(centerPxX, centerPxY);
-            log.info("[TERRAIN SCULPT] Map {}: Applied {} (radius: {}m, delta: {}m) at [{}, {}]. Real new center alt: {} m",
-                    mapId, op, radius, delta, request.centerLat(), request.centerLon(), finalCenterAlt);
+            log.info("[TERRAIN SCULPT] Map {}: Applied {} (radius: {}m, delta: {}m). New altitude at center: {} m",
+                    mapId, operation, radius, delta, finalCenterAlt);
 
             return finalCenterAlt;
 
         } catch (Exception e) {
-            log.error("[TERRAIN SCULPT] Failed to sculpt terrain for map " + mapId, e);
-            throw new RuntimeException("Terrain sculpt failed: " + e.getMessage(), e);
-        }
-    }
-
-    /**
-     * Generates a valid uncompressed 32-bit Float GeoTIFF file filled with a baseline elevation.
-     */
-    private void createBaselineDemFile(File file, int width, int height, float baseElevation) throws IOException {
-        Files.createDirectories(file.getParentFile().toPath());
-        int dataSizeBytes = width * height * 4;
-        int ifdOffset = 8 + dataSizeBytes;
-
-        ByteBuffer buffer = ByteBuffer.allocate(ifdOffset + 256).order(ByteOrder.LITTLE_ENDIAN);
-
-        // 1. Header
-        buffer.put((byte) 'I');
-        buffer.put((byte) 'I');
-        buffer.putShort((short) 42);
-        buffer.putInt(ifdOffset);
-
-        // 2. Data
-        for (int i = 0; i < width * height; i++) {
-            buffer.putFloat(baseElevation);
-        }
-
-        // 3. IFD
-        buffer.putShort((short) 10);
-        writeTiffTag(buffer, 256, 4, 1, width);
-        writeTiffTag(buffer, 257, 4, 1, height);
-        writeTiffTag(buffer, 258, 3, 1, 32);
-        writeTiffTag(buffer, 259, 3, 1, 1);
-        writeTiffTag(buffer, 262, 3, 1, 1);
-        writeTiffTag(buffer, 273, 4, 1, 8);
-        writeTiffTag(buffer, 277, 3, 1, 1);
-        writeTiffTag(buffer, 278, 4, 1, height);
-        writeTiffTag(buffer, 279, 4, 1, dataSizeBytes);
-        writeTiffTag(buffer, 339, 3, 1, 3);
-        buffer.putInt(0);
-
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            fos.write(buffer.array(), 0, buffer.position());
-        }
-    }
-
-    /**
-     * Writes an uncompressed single-band 32-bit IEEE Float TIFF file.
-     */
-    private void writeNativeFloat32Tiff(File file, WritableRaster raster, int width, int height) throws IOException {
-        int dataSizeBytes = width * height * 4;
-        int ifdOffset = 8 + dataSizeBytes;
-        int totalBufferSize = ifdOffset + 256;
-
-        ByteBuffer buffer = ByteBuffer.allocate(totalBufferSize).order(ByteOrder.LITTLE_ENDIAN);
-
-        // 1. Header
-        buffer.put((byte) 'I');
-        buffer.put((byte) 'I');
-        buffer.putShort((short) 42);
-        buffer.putInt(ifdOffset);
-
-        // 2. Data
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                buffer.putFloat(raster.getSampleFloat(x, y, 0));
-            }
-        }
-
-        // 3. IFD
-        buffer.putShort((short) 10);
-        writeTiffTag(buffer, 256, 4, 1, width);
-        writeTiffTag(buffer, 257, 4, 1, height);
-        writeTiffTag(buffer, 258, 3, 1, 32);
-        writeTiffTag(buffer, 259, 3, 1, 1);
-        writeTiffTag(buffer, 262, 3, 1, 1);
-        writeTiffTag(buffer, 273, 4, 1, 8);
-        writeTiffTag(buffer, 277, 3, 1, 1);
-        writeTiffTag(buffer, 278, 4, 1, height);
-        writeTiffTag(buffer, 279, 4, 1, dataSizeBytes);
-        writeTiffTag(buffer, 339, 3, 1, 3);
-        buffer.putInt(0);
-
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            fos.write(buffer.array(), 0, buffer.position());
-        }
-    }
-
-    private void writeTiffTag(ByteBuffer buf, int tagId, int type, int count, int valueOrOffset) {
-        buf.putShort((short) tagId);
-        buf.putShort((short) type);
-        buf.putInt(count);
-        if (type == 3) {
-            buf.putShort((short) valueOrOffset);
-            buf.putShort((short) 0);
-        } else {
-            buf.putInt(valueOrOffset);
+            log.error("[TERRAIN SCULPT] Failed to sculpt terrain for map {}", mapId, e);
+            throw new RuntimeException("Terrain sculpt execution failed: " + e.getMessage(), e);
         }
     }
 }

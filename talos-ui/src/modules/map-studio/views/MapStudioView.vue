@@ -17,40 +17,34 @@
             @created="onMapCreated"
         />
 
-        <!-- 3. Specific Map Editor Screen (Modifiers & layers configuration) -->
+        <!-- 3. Specific Map Editor Screen (Modifiers, vectors & sculpting configuration) -->
         <MapEditorView
             v-else-if="currentScreen === 'editor' && selectedMap"
             :map="selectedMap"
             @back="currentScreen = 'hub'"
+            @launch-sim="$emit('switch-to-sim')"
         />
 
         <!-- Global Catalog Modal (Accessible from Hub) -->
-        <div v-if="openCatalogModal" class="catalog-modal-overlay">
-            <div class="catalog-modal-box">
-                <div class="modal-top">
-                    <h4>ГЛОБАЛЬНИЙ ДОВІДНИК ТТХ ОБ'ЄКТІВ (ЗА ЗАМОВЧУВАННЯМ)</h4>
-                    <button class="btn-close" @click="openCatalogModal = false">✕</button>
-                </div>
-                <p class="modal-desc">
-                    Ці коефіцієнти автоматично копіюються у всі нові карти при їх створенні. Зміни тут не впливають на вже створені полігони.
-                </p>
-                <div class="modal-table-placeholder">
-                    <div class="spec-note">
-                        Будівлі (залізобетонні/житлові), ліси, річки та дороги вже мають закладені норми захисту (80% для будівель, 50% для лісу).
-                    </div>
-                </div>
-            </div>
-        </div>
+        <GlobalTemplateCatalogModal
+            v-if="openCatalogModal"
+            @close="openCatalogModal = false"
+        />
     </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import { mapApi } from '../mapApi';
-import type { MapDetailDto } from '../types';
-import MapHubView from './MapHubView.vue';
-import MapCreatorView from './MapCreatorView.vue';
-import MapEditorView from './MapEditorView.vue';
+import { mapApi } from '@/modules/map-studio/mapApi';
+import type { MapDetailDto } from '@/modules/map-studio/types';
+import MapHubView from '@/modules/map-studio/views/MapHubView.vue';
+import MapCreatorView from '@/modules/map-studio/views/MapCreatorView.vue';
+import MapEditorView from '@/modules/map-studio/views/MapEditorView.vue';
+import GlobalTemplateCatalogModal from '../components/GlobalTemplateCatalogModal.vue';
+
+defineEmits<{
+    (e: 'switch-to-sim'): void;
+}>();
 
 // Active screen state: 'hub' | 'creator' | 'editor'
 const currentScreen = ref<'hub' | 'creator' | 'editor'>('hub');
@@ -61,8 +55,8 @@ const openCatalogModal = ref(false);
 const fetchMaps = async () => {
     try {
         maps.value = await mapApi.getAllMaps();
-    } catch (err) {
-        console.error('Failed to load maps list', err);
+    } catch (err: unknown) {
+        console.error('[TALOS STUDIO] Failed to load maps list:', err);
     }
 };
 
@@ -79,9 +73,13 @@ const onMapCreated = async () => {
 const onDeleteMap = async (mapId: string) => {
     try {
         await mapApi.deleteMap(mapId);
+        if (selectedMap.value?.id === mapId) {
+            selectedMap.value = null;
+        }
         await fetchMaps();
-    } catch (err: any) {
-        alert('Помилка видалення карти: ' + err.message);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        alert('Помилка видалення карти: ' + message);
     }
 };
 
@@ -137,6 +135,10 @@ onMounted(fetchMaps);
     color: #94a3b8;
     font-size: 16px;
     cursor: pointer;
+    transition: color 0.15s ease-in-out;
+}
+.btn-close:hover {
+    color: #ffffff;
 }
 .modal-desc {
     font-size: 12px;

@@ -24,26 +24,27 @@
         </div>
 
         <!-- Tactical C2 HUD Overlay -->
-        <div class="tactical-hud">
+        <aside class="tactical-hud">
             <div class="hud-header">
                 <span class="pulse-indicator" :class="{ online: isConnected }"></span>
                 <h3>TALOS C2 INTERFACE</h3>
             </div>
 
             <!-- Active Map Info -->
-            <div class="hud-section" v-if="activeMap">
+            <div v-if="activeMap" class="hud-section">
                 <div class="section-title">БОЙОВИЙ КВАДРАТ (ТВД):</div>
                 <div class="theater-name">{{ activeMap.name }} ({{ activeMap.sizeKm }}×{{ activeMap.sizeKm }} км)</div>
                 <div class="theater-coords">ЦЕНТР: {{ activeMap.centerLat.toFixed(3) }}, {{ activeMap.centerLon.toFixed(3) }}</div>
             </div>
 
             <!-- Basemap Switcher (Satellite / Topo / Tactical) -->
-            <div class="hud-section" v-if="activeMap && activeMap.layers.length > 0">
+            <div v-if="activeMap && activeMap.layers.length > 0" class="hud-section">
                 <div class="section-title">ПІДКЛАДКА КАРТИ (OFFLINE):</div>
                 <div class="basemap-group">
                     <button
                         v-for="layer in activeMap.layers"
                         :key="layer.id"
+                        type="button"
                         class="basemap-btn"
                         :class="{ active: currentLayerType === layer.layerType }"
                         @click="switchBaseLayer(layer.layerType)"
@@ -69,9 +70,9 @@
             <div v-if="selectedUnitIds.size > 0" class="command-panel">
                 <div class="panel-label">КОМАНДИ:</div>
                 <div class="btn-group">
-                    <button class="c2-btn danger" @click="sendCommand('ORDER_HALT')">СТОП</button>
-                    <button class="c2-btn" @click="sendCommand('ORDER_CHANGE_SPEED', { speedKmh: 30 })">30 км/г</button>
-                    <button class="c2-btn" @click="sendCommand('ORDER_CHANGE_SPEED', { speedKmh: 60 })">60 км/г</button>
+                    <button type="button" class="c2-btn danger" @click="sendCommand('ORDER_HALT')">СТОП</button>
+                    <button type="button" class="c2-btn" @click="sendCommand('ORDER_CHANGE_SPEED', { speedKmh: 30 })">30 км/г</button>
+                    <button type="button" class="c2-btn" @click="sendCommand('ORDER_CHANGE_SPEED', { speedKmh: 60 })">60 км/г</button>
                 </div>
             </div>
 
@@ -99,7 +100,7 @@
                     </div>
                 </div>
             </div>
-        </div>
+        </aside>
     </div>
 </template>
 
@@ -107,6 +108,7 @@
 import { onMounted, onUnmounted, ref, reactive } from 'vue';
 import {
     Viewer,
+    Cartesian2,
     Cartesian3,
     Color,
     Entity,
@@ -123,10 +125,13 @@ import {
     SceneTransforms,
     Cartographic,
     PolylineDashMaterialProperty,
-    CallbackProperty
+    CallbackProperty,
+    PolygonHierarchy,
+    ConstantPositionProperty,
+    ConstantProperty
 } from 'cesium';
-import { mapApi } from '../modules/map-studio/mapApi';
-import type { MapDetailDto } from '../modules/map-studio/types';
+import { mapApi } from '@/modules/map-studio/mapApi';
+import type { MapDetailDto, LayerType } from '@/modules/map-studio/types';
 
 interface WaypointDto {
     lat: number;
@@ -155,7 +160,7 @@ const selectedUnitIds = ref<Set<string>>(new Set());
 
 // Active map and baselayer state
 const activeMap = ref<MapDetailDto | null>(null);
-const currentLayerType = ref<string>('SATELLITE');
+const currentLayerType = ref<LayerType>('SATELLITE');
 
 // Mouse box selection state
 const selectionBox = reactive({
@@ -170,6 +175,8 @@ const selectionBox = reactive({
 
 const isShiftPressed = ref(false);
 let justFinishedBoxSelect = false;
+let isDestroyed = false;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 let viewer: Viewer | null = null;
 let socket: WebSocket | null = null;
@@ -179,6 +186,7 @@ const entityMap = new Map<string, Entity>();
 const routeEntities = new Map<string, Entity>();
 const routeCoordinatesMap = new Map<string, Cartesian3[]>();
 let fovConeEntity: Entity | null = null;
+let fovConePositions: Cartesian3[] = [];
 const losLineEntities = new Map<string, Entity>();
 const losCoordinatesMap = new Map<string, Cartesian3[]>();
 
@@ -220,7 +228,6 @@ onMounted(async () => {
     if (activeMap.value) {
         applyTheaterBounds(activeMap.value);
     } else {
-        // Default fallback camera location
         viewer.camera.flyTo({
             destination: Cartesian3.fromDegrees(23.58, 49.98, 5000),
             duration: 1.0
@@ -233,12 +240,11 @@ onMounted(async () => {
 });
 
 /**
- * Clamps the 3D globe to the exact 20x20 km bounding box and sets up local tile streaming.
+ * Clamps the 3D globe to the exact bounding box and sets up local tile streaming.
  */
 const applyTheaterBounds = (map: MapDetailDto) => {
     if (!viewer) return;
 
-    // Exact bounding box of the theater
     const theaterRect = Rectangle.fromDegrees(
         map.minLon,
         map.minLat,
@@ -246,17 +252,13 @@ const applyTheaterBounds = (map: MapDetailDto) => {
         map.maxLat
     );
 
-    // CLAMP GLOBE: Completely cuts off the rest of the planet outside the bounding box
+    // Limit globe to operational theater envelope
     viewer.scene.globe.cartographicLimitRectangle = theaterRect;
-
-    // Restrict camera altitude to stay within tactical theater limits (50m to 35km)
     viewer.scene.screenSpaceCameraController.minimumZoomDistance = 50.0;
     viewer.scene.screenSpaceCameraController.maximumZoomDistance = 35000.0;
 
-    // Mount active local basemap
     switchBaseLayer(currentLayerType.value);
 
-    // Smooth camera fly-in into the bounded theater under a tactical angle
     viewer.camera.flyTo({
         destination: Cartesian3.fromDegrees(map.centerLon, map.centerLat - 0.05, 4500),
         orientation: {
@@ -269,20 +271,20 @@ const applyTheaterBounds = (map: MapDetailDto) => {
 };
 
 /**
- * Switches between local baselayers (SATELLITE, TOPOGRAPHIC, TACTICAL) without internet access.
+ * Switches between local baselayers (SATELLITE, TOPOGRAPHIC, TACTICAL).
  */
-const switchBaseLayer = (layerType: string) => {
+const switchBaseLayer = (layerType: LayerType) => {
     if (!viewer || !activeMap.value) return;
 
     currentLayerType.value = layerType;
     viewer.imageryLayers.removeAll();
 
     const layerMeta = activeMap.value.layers.find(l => l.layerType === layerType);
-    const minZ = layerMeta ? layerMeta.minZoom : 12;
+    const minZ = layerMeta ? layerMeta.minZoom : 10;
     const maxZ = layerMeta ? layerMeta.maxZoom : 16;
 
-    // Stream raster tiles directly from our local Spring Boot controller
-    const tileUrl = `http://localhost:8080/api/maps/${activeMap.value.id}/tiles/${layerType.toLowerCase()}/{z}/{x}/{y}.png`;
+    // Stream tiles via relative proxy URL
+    const tileUrl = `/api/maps/${activeMap.value.id}/tiles/${layerType.toLowerCase()}/{z}/{x}/{y}.png`;
 
     const provider = new UrlTemplateImageryProvider({
         url: tileUrl,
@@ -301,14 +303,14 @@ const switchBaseLayer = (layerType: string) => {
 };
 
 const setupKeyboardListeners = () => {
-    window.addEventListener('keydown', (e) => {
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
         if (e.key === 'Shift') {
             isShiftPressed.value = true;
             if (viewer) viewer.scene.screenSpaceCameraController.enableInputs = false;
         }
     });
 
-    window.addEventListener('keyup', (e) => {
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
         if (e.key === 'Shift') {
             isShiftPressed.value = false;
             if (viewer && !selectionBox.active) {
@@ -324,23 +326,24 @@ const setupMouseInteractions = () => {
     handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 
     // 1. LEFT CLICK: Single unit selection
-    handler.setInputAction((click: any) => {
+    handler.setInputAction((event: { position: Cartesian2 }) => {
         if (justFinishedBoxSelect) {
             justFinishedBoxSelect = false;
             return;
         }
 
-        const picked = viewer!.scene.pick(click.position);
+        const picked = viewer!.scene.pick(event.position);
 
         if (defined(picked) && picked.id && entityMap.has(picked.id.id)) {
+            const pickedId = picked.id.id;
             if (isShiftPressed.value) {
-                if (selectedUnitIds.value.has(picked.id.id)) {
-                    selectedUnitIds.value.delete(picked.id.id);
+                if (selectedUnitIds.value.has(pickedId)) {
+                    selectedUnitIds.value.delete(pickedId);
                 } else {
-                    selectedUnitIds.value.add(picked.id.id);
+                    selectedUnitIds.value.add(pickedId);
                 }
             } else {
-                selectedUnitIds.value = new Set([picked.id.id]);
+                selectedUnitIds.value = new Set([pickedId]);
             }
         } else {
             if (!isShiftPressed.value) {
@@ -350,10 +353,10 @@ const setupMouseInteractions = () => {
     }, ScreenSpaceEventType.LEFT_CLICK);
 
     // 2. RIGHT CLICK: Tactical order waypoint assignment
-    handler.setInputAction((click: any) => {
+    handler.setInputAction((event: { position: Cartesian2 }) => {
         if (selectedUnitIds.value.size === 0) return;
 
-        const ray = viewer!.camera.getPickRay(click.position);
+        const ray = viewer!.camera.getPickRay(event.position);
         if (!ray) return;
         const cartesian = viewer!.scene.globe.pick(ray, viewer!.scene);
         if (!cartesian) return;
@@ -432,15 +435,24 @@ const setupMouseInteractions = () => {
 };
 
 const connectWebSocket = () => {
-    socket = new WebSocket('ws://localhost:8080/ws/simulation');
+    if (isDestroyed) return;
+
+    // Dynamically resolve protocol and host for robust execution in all environments
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socketUrl = `${protocol}//${window.location.host}/ws/simulation`;
+
+    socket = new WebSocket(socketUrl);
 
     socket.onopen = () => {
         isConnected.value = true;
+        console.log('[TALOS C2] WebSocket telemetry stream connected');
     };
 
     socket.onclose = () => {
         isConnected.value = false;
-        setTimeout(connectWebSocket, 2000);
+        if (!isDestroyed) {
+            reconnectTimer = setTimeout(connectWebSocket, 2000);
+        }
     };
 
     socket.onmessage = (event) => {
@@ -454,16 +466,18 @@ const connectWebSocket = () => {
             const selectedUnit = incomingUnits.find(u => u.id === selectedId);
             updateFovCone(selectedUnit);
             updateLosLines(incomingUnits);
-        } catch (err) {}
+        } catch (err) {
+            console.error('[TALOS C2] Telemetry message decode error:', err);
+        }
     };
 };
 
-const sendCommand = (type: string, extra: Record<string, any> = {}) => {
+const sendCommand = (type: string, extra: Record<string, unknown> = {}) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     if (selectedUnitIds.value.size === 0) return;
 
     const payload = {
-        type: type,
+        type,
         unitIds: Array.from(selectedUnitIds.value),
         ...extra
     };
@@ -498,8 +512,8 @@ const renderUnits = (data: UnitDto[]) => {
             const entity = currentViewer.entities.add({
                 id: u.id,
                 name: u.callsign,
-                position: position,
-                orientation: orientation,
+                position: new ConstantPositionProperty(position),
+                orientation: new ConstantProperty(orientation),
                 point: {
                     pixelSize: isSelected ? 18 : (isOpfor ? 15 : 13),
                     color: baseColor,
@@ -522,12 +536,12 @@ const renderUnits = (data: UnitDto[]) => {
             entityMap.set(u.id, entity);
         } else {
             const entity = entityMap.get(u.id)!;
-            entity.position = position as any;
-            entity.orientation = orientation as any;
+            (entity.position as ConstantPositionProperty).setValue(position);
+            (entity.orientation as ConstantProperty).setValue(orientation);
 
             if (entity.point) {
-                entity.point.color = baseColor as any;
-                entity.point.pixelSize = (isSelected ? 18 : (isOpfor ? 15 : 13)) as any;
+                entity.point.color = new ConstantProperty(baseColor);
+                entity.point.pixelSize = new ConstantProperty(isSelected ? 18 : (isOpfor ? 15 : 13));
             }
         }
     });
@@ -586,6 +600,7 @@ const updateFovCone = (selectedUnit: UnitDto | undefined) => {
         if (fovConeEntity) {
             currentViewer.entities.remove(fovConeEntity);
             fovConeEntity = null;
+            fovConePositions = [];
         }
         return;
     }
@@ -594,7 +609,7 @@ const updateFovCone = (selectedUnit: UnitDto | undefined) => {
     const rangeMeters = 1400.0;
     const centerHeading = selectedUnit.heading;
 
-    const points: Cartesian3[] = [
+    fovConePositions = [
         Cartesian3.fromDegrees(selectedUnit.lon, selectedUnit.lat, selectedUnit.altitude)
     ];
 
@@ -605,14 +620,14 @@ const updateFovCone = (selectedUnit: UnitDto | undefined) => {
 
         const pLat = selectedUnit.lat + dNorth / 111132.0;
         const pLon = selectedUnit.lon + dEast / 71500.0;
-        points.push(Cartesian3.fromDegrees(pLon, pLat, selectedUnit.altitude));
+        fovConePositions.push(Cartesian3.fromDegrees(pLon, pLat, selectedUnit.altitude));
     }
 
     if (!fovConeEntity) {
         fovConeEntity = currentViewer.entities.add({
             id: 'fov-cone',
             polygon: {
-                hierarchy: new CallbackProperty(() => ({ positions: points, holes: [] }), false),
+                hierarchy: new CallbackProperty(() => new PolygonHierarchy(fovConePositions), false),
                 material: Color.CYAN.withAlpha(0.12),
                 outline: true,
                 outlineColor: Color.CYAN.withAlpha(0.6),
@@ -680,8 +695,13 @@ const toggleUnitSelection = (id: string, event: MouseEvent) => {
 };
 
 onUnmounted(() => {
+    isDestroyed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     if (handler) handler.destroy();
-    if (socket) socket.close();
+    if (socket) {
+        socket.onclose = null;
+        socket.close();
+    }
     if (viewer) viewer.destroy();
 });
 </script>

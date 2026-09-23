@@ -5,9 +5,13 @@ import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
+/**
+ * WebSocket handshake and endpoint registration configuration.
+ */
 @Configuration
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
+
     private final TelemetryHandler telemetryHandler;
 
     public WebSocketConfig(TelemetryHandler telemetryHandler) {

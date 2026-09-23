@@ -1,5 +1,6 @@
 package com.talos.gis.repository;
 
+import com.talos.gis.entity.MapFeatureEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -7,29 +8,28 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.talos.model.entity.MapFeatureEntity;
 import java.util.UUID;
 
 /**
- * Dedicated data-access repository handling initial feature ingestion into map_features.
- * Encapsulates all spatial extraction logic behind repository methods.
+ * Dedicated spatial data-access repository extracting vector geometries
+ * from raw OSM tables (planet_osm_*) into bounded map_features.
  */
 @Repository
 public interface OsmExtractionRepository extends JpaRepository<MapFeatureEntity, UUID> {
 
     /**
-     * Extracts roads from planet_osm_line and populates map_features for this map.
+     * Extracts road lines from planet_osm_line intersecting the theater envelope.
      */
     @Modifying
     @Transactional
     @Query(nativeQuery = true, value = """
         INSERT INTO map_features (id, map_id, osm_id, name, category, type_key, type_value, geometry_type, geojson)
-        SELECT gen_random_uuid(), :mapId, osm_id, COALESCE(name, 'Дорога'), 'ROAD', 'highway', highway, 'LineString',
+        SELECT gen_random_uuid(), :mapId, osm_id, COALESCE(name, 'Road'), 'ROAD', 'highway', highway, 'LineString',
                ST_AsGeoJSON(ST_Transform(way, 4326))
         FROM planet_osm_line
         WHERE highway IS NOT NULL
           AND way && ST_Transform(ST_MakeEnvelope(:minLon, :minLat, :maxLon, :maxLat, 4326), 3857)
-        LIMIT 300
+        LIMIT 1000
     """)
     void extractRoadsForMap(
             @Param("mapId") UUID mapId,
@@ -40,14 +40,13 @@ public interface OsmExtractionRepository extends JpaRepository<MapFeatureEntity,
     );
 
     /**
-     * Extracts area polygons (forests, buildings, water) and populates map_features.
-     * Keyword "natural" is properly quoted.
+     * Extracts area polygons (forests, buildings, water, structures) intersecting the theater envelope.
      */
     @Modifying
     @Transactional
     @Query(nativeQuery = true, value = """
         INSERT INTO map_features (id, map_id, osm_id, name, category, type_key, type_value, geometry_type, geojson)
-        SELECT gen_random_uuid(), :mapId, osm_id, COALESCE(name, 'Ділянка'),
+        SELECT gen_random_uuid(), :mapId, osm_id, COALESCE(name, 'Area'),
                CASE 
                    WHEN building IS NOT NULL THEN 'BUILDING'
                    WHEN "natural" = 'wood' OR landuse = 'forest' THEN 'VEGETATION'
@@ -65,7 +64,7 @@ public interface OsmExtractionRepository extends JpaRepository<MapFeatureEntity,
         FROM planet_osm_polygon
         WHERE (building IS NOT NULL OR "natural" IS NOT NULL OR landuse IS NOT NULL)
           AND way && ST_Transform(ST_MakeEnvelope(:minLon, :minLat, :maxLon, :maxLat, 4326), 3857)
-        LIMIT 300
+        LIMIT 1000
     """)
     void extractPolygonsForMap(
             @Param("mapId") UUID mapId,

@@ -1,14 +1,20 @@
-package com.talos.model.entity;
+package com.talos.gis.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.time.OffsetDateTime;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
  * JPA Entity representing a locally stored basemap layer (e.g. Satellite, Topographic).
  */
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
 @Entity
 @Table(name = "map_layers")
 public class MapLayerEntity {
@@ -44,4 +50,16 @@ public class MapLayerEntity {
 
     @Column(name = "created_at", insertable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof MapLayerEntity that)) return false;
+        return id != null && Objects.equals(id, that.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }

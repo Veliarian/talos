@@ -1,19 +1,42 @@
 package com.talos.gis.util;
 
-import com.talos.model.dto.gis.BoundingBox;
+import com.talos.gis.dto.BoundingBox;
 
 /**
  * Utility class for geographic calculations, bounding box generation,
- * and Slippy Map (XYZ tile) coordinate transformations.
+ * and Slippy Map (XYZ tile) coordinate transformations using EPSG:3857 (Web Mercator).
  */
 public final class GeoMath {
 
     private static final double METERS_PER_DEGREE_LAT = 111132.95;
+    private static final double MAX_MERCATOR_LAT = 85.05112878;
 
     private GeoMath() {}
 
+    public record ZoomRange(int minZoom, int maxZoom) {}
+
     /**
-     * Calculates an exact bounding box centered at (lat, lon) with a square dimension in kilometers.
+     * Dynamically calculates optimal Slippy Map tile zoom range [minZoom..maxZoom]
+     * based on theater size and latitude, preventing exponential tile explosions.
+     */
+    public static ZoomRange calculateOptimalZoomRange(double centerLat, double sizeKm) {
+        double halfSizeMeters = (sizeKm * 1000.0) / 2.0;
+        double metersPerDegreeLon = METERS_PER_DEGREE_LAT * Math.cos(Math.toRadians(centerLat));
+        double deltaLonBbox = (halfSizeMeters * 2.0) / (metersPerDegreeLon > 100.0 ? metersPerDegreeLon : 100.0);
+
+        // 1. minZoom: Whole theater fits in 1 to 2 overview tiles
+        int minZoom = (int) Math.floor(Math.log(360.0 / deltaLonBbox) / Math.log(2));
+        minZoom = Math.clamp(minZoom, 3, 13);
+
+        // 2. maxZoom: Target tile budget strictly capped under ~1200 tiles per layer
+        int maxZoom = (int) Math.floor(Math.log(12500.0 / deltaLonBbox) / Math.log(2));
+        maxZoom = Math.clamp(maxZoom, minZoom + 2, 16);
+
+        return new ZoomRange(minZoom, maxZoom);
+    }
+
+    /**
+     * Calculates an exact bounding box centered at (centerLat, centerLon) with a square dimension in kilometers.
      */
     public static BoundingBox calculateBoundingBox(double centerLat, double centerLon, double sizeKm) {
         double halfSizeMeters = (sizeKm * 1000.0) / 2.0;
@@ -29,33 +52,31 @@ public final class GeoMath {
         );
     }
 
-    /**
-     * Converts longitude to tile X coordinate at a given zoom level.
-     */
     public static int lonToTileX(double lon, int zoom) {
         return (int) Math.floor((lon + 180.0) / 360.0 * (1 << zoom));
     }
 
-    /**
-     * Converts latitude to tile Y coordinate at a given zoom level (Web Mercator projection).
-     */
     public static int latToTileY(double lat, int zoom) {
-        double latRad = Math.toRadians(lat);
+        double clampedLat = Math.clamp(lat, -MAX_MERCATOR_LAT, MAX_MERCATOR_LAT);
+        double latRad = Math.toRadians(clampedLat);
         return (int) Math.floor((1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * (1 << zoom));
     }
 
-    /**
-     * Represents an integer range of tile coordinates [min, max] inclusive.
-     */
+    public static double lonToTileXDouble(double lon, int zoom) {
+        return (lon + 180.0) / 360.0 * (1 << zoom);
+    }
+
+    public static double latToTileYDouble(double lat, int zoom) {
+        double clampedLat = Math.clamp(lat, -MAX_MERCATOR_LAT, MAX_MERCATOR_LAT);
+        double latRad = Math.toRadians(clampedLat);
+        return (1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * (1 << zoom);
+    }
+
     public record TileRange(int minX, int maxX, int minY, int maxY) {}
 
-    /**
-     * Computes the bounding range of tiles covering a given BoundingBox at a specified zoom.
-     */
     public static TileRange getTileRange(BoundingBox bbox, int zoom) {
         int minX = lonToTileX(bbox.minLon(), zoom);
         int maxX = lonToTileX(bbox.maxLon(), zoom);
-        // In Web Mercator, tile Y=0 is at the North Pole, so maxLat gives minY
         int minY = latToTileY(bbox.maxLat(), zoom);
         int maxY = latToTileY(bbox.minLat(), zoom);
 
@@ -65,14 +86,5 @@ public final class GeoMath {
                 Math.min(minY, maxY),
                 Math.max(minY, maxY)
         );
-    }
-
-    public static double lonToTileXDouble(double lon, int zoom) {
-        return (lon + 180.0) / 360.0 * (1 << zoom);
-    }
-
-    public static double latToTileYDouble(double lat, int zoom) {
-        double latRad = Math.toRadians(lat);
-        return (1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * (1 << zoom);
     }
 }

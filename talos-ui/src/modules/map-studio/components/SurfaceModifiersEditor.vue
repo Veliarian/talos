@@ -28,19 +28,55 @@
                         <div class="desc">{{ mod.description }}</div>
                     </td>
                     <td>
-                        <input type="number" step="0.05" min="0" max="1.5" v-model.number="mod.speedModifierWheeled" class="num-input" />
+                        <input
+                            v-model.number="mod.speedModifierWheeled"
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            max="1.5"
+                            class="num-input"
+                        />
                     </td>
                     <td>
-                        <input type="number" step="0.05" min="0" max="1.5" v-model.number="mod.speedModifierTracked" class="num-input" />
+                        <input
+                            v-model.number="mod.speedModifierTracked"
+                            type="number"
+                            step="0.05"
+                            min="0"
+                            max="1.5"
+                            class="num-input"
+                        />
                     </td>
                     <td>
-                        <input type="number" step="10" min="10" max="5000" v-model.number="mod.visibilityMeters" placeholder="Без меж" class="num-input" />
+                        <input
+                            v-model.number="mod.visibilityMeters"
+                            type="number"
+                            step="10"
+                            min="10"
+                            max="5000"
+                            placeholder="Без меж"
+                            class="num-input"
+                        />
                     </td>
                     <td>
-                        <input type="number" step="5" min="0" max="95" v-model.number="mod.coverDefensePercent" class="num-input" />
+                        <input
+                            v-model.number="mod.coverDefensePercent"
+                            type="number"
+                            step="5"
+                            min="0"
+                            max="95"
+                            class="num-input"
+                        />
                     </td>
                     <td>
-                        <button class="btn-save" @click="saveModifier(mod)">ЗБЕРЕГТИ</button>
+                        <button
+                            type="button"
+                            class="btn-save"
+                            :disabled="savingId === mod.id"
+                            @click="saveModifier(mod)"
+                        >
+                            {{ savingId === mod.id ? '...' : 'ЗБЕРЕГТИ' }}
+                        </button>
                     </td>
                 </tr>
                 </tbody>
@@ -51,8 +87,8 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue';
-import { mapApi } from '../mapApi';
-import type { SurfaceModifierDto } from '../types';
+import { mapApi } from '@/modules/map-studio/mapApi';
+import type { SurfaceModifierDto } from '@/modules/map-studio/types';
 
 const props = defineProps<{
     mapId: string;
@@ -61,14 +97,15 @@ const props = defineProps<{
 
 const modifiers = ref<SurfaceModifierDto[]>([]);
 const loading = ref(false);
+const savingId = ref<string | null>(null);
 
 const loadModifiers = async () => {
     if (!props.mapId) return;
     try {
         loading.value = true;
         modifiers.value = await mapApi.getModifiers(props.mapId);
-    } catch (err: any) {
-        console.error('Failed to load modifiers:', err);
+    } catch (err: unknown) {
+        console.error('[TALOS MODIFIERS] Failed to load surface modifiers:', err);
     } finally {
         loading.value = false;
     }
@@ -78,10 +115,19 @@ watch(() => props.mapId, loadModifiers, { immediate: true });
 
 const saveModifier = async (mod: SurfaceModifierDto) => {
     try {
+        savingId.value = mod.id;
+        // Normalize visibility to null if empty or non-positive
+        if (mod.visibilityMeters !== null && (isNaN(mod.visibilityMeters) || mod.visibilityMeters <= 0)) {
+            mod.visibilityMeters = null;
+        }
+
         await mapApi.updateModifier(props.mapId, mod);
         alert(`Збережено ТТХ для: ${mod.osmValue}`);
-    } catch (err: any) {
-        alert('Помилка збереження: ' + err.message);
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        alert('Помилка збереження: ' + message);
+    } finally {
+        savingId.value = null;
     }
 };
 </script>
@@ -150,6 +196,7 @@ const saveModifier = async (mod: SurfaceModifierDto) => {
 .cat-pill.vegetation { background: #064e3b; color: #6ee7b7; }
 .cat-pill.water { background: #0c4a6e; color: #7dd3fc; }
 .cat-pill.soil { background: #78350f; color: #fde68a; }
+.cat-pill.building { background: #4c1d95; color: #c4b5fd; }
 
 .num-input {
     width: 70px;
@@ -161,6 +208,10 @@ const saveModifier = async (mod: SurfaceModifierDto) => {
     font-family: monospace;
     border-radius: 3px;
 }
+.num-input:focus {
+    border-color: #00a8ff;
+    outline: none;
+}
 .btn-save {
     background: #047857;
     border: 1px solid #10b981;
@@ -170,8 +221,20 @@ const saveModifier = async (mod: SurfaceModifierDto) => {
     cursor: pointer;
     border-radius: 3px;
     font-family: monospace;
+    transition: all 0.15s ease-in-out;
 }
-.btn-save:hover {
+.btn-save:hover:not(:disabled) {
     background: #059669;
+}
+.btn-save:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.empty-state {
+    padding: 24px;
+    text-align: center;
+    color: #64748b;
+    font-size: 12px;
+    font-family: monospace;
 }
 </style>

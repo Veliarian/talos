@@ -1,11 +1,11 @@
-package com.talos.model.dto.gis;
+package com.talos.gis.dto;
 
 import java.util.UUID;
 
 /**
- * DTO for viewing and updating surface movement and concealment parameters.
+ * DTO for managing global doctrine surface modifier templates.
  */
-public record SurfaceModifierDto(
+public record DefaultModifierDto(
         UUID id,
         String category,
         String osmKey,

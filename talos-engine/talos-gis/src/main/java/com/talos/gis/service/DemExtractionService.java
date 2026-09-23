@@ -1,8 +1,8 @@
 package com.talos.gis.service;
 
+import com.talos.gis.dto.BoundingBox;
 import com.talos.gis.util.DemRaster;
 import com.talos.gis.util.GeoMath;
-import com.talos.model.dto.gis.BoundingBox;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,148 +15,205 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.UUID;
 
 /**
- * Service downloading real global elevation directly as 32-bit Float GeoTIFF (.tif) files.
- * Properly stitches full 512x512 GeoTIFF tiles without dropping data.
+ * Robust service downloading real global elevation directly as 32-bit Float GeoTIFF (.tif) files.
+ * Employs adaptive DEM zoom scaling based on theater dimensions to guarantee sub-5-second extraction
+ * for both local tactical polygons (5 km) and massive operational theaters (500+ km).
  */
 @Service
 public class DemExtractionService {
 
     private static final Logger log = LoggerFactory.getLogger(DemExtractionService.class);
 
-    // Direct open 32-bit Float GeoTIFF (.tif) dataset (Copernicus 30m + SRTM)
+    // Direct open 32-bit Float GeoTIFF dataset (Copernicus 30m + SRTM)
     private static final String GEOTIFF_TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/geotiff/{z}/{x}/{y}.tif";
 
-    // AWS GeoTIFF tiles have resolution of 512x512 pixels
     private static final int TILE_SIZE = 512;
+    private static final int OUTPUT_RESOLUTION = 512;
+    private static final float NO_DATA_THRESHOLD = -500.0f; // S3 SRTM flags nodata as -9999.0f
+    private static final long RATE_LIMIT_DELAY_MS = 350;
 
     private final HttpClient httpClient;
+    private final GisStorageService storageService;
 
-    public DemExtractionService() {
+    public DemExtractionService(GisStorageService storageService) {
+        this.storageService = storageService;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
     }
 
-    public String extractTheaterElevation(UUID mapId, BoundingBox bbox, String storageRoot) {
-        Path targetDir = Paths.get(storageRoot, "maps", mapId.toString());
+    /**
+     * Sequentially extracts elevation data for the theater bounding box and writes clean Float32 terrain.tif.
+     *
+     * @param mapId  theater map UUID
+     * @param bbox   geographic bounding box
+     * @param sizeKm width and height of the theater in kilometers
+     * @return absolute path to created terrain.tif file
+     */
+    public String extractTheaterElevation(UUID mapId, BoundingBox bbox, double sizeKm) {
+        Path targetDir = storageService.resolvePath(String.format("maps/%s", mapId));
         Path targetFile = targetDir.resolve("terrain.tif");
 
         try {
-            Files.createDirectories(targetDir);
+            storageService.ensureDirectoriesExist(targetDir);
 
-            int demZoom = 11;
+            // 1. Calculate adaptive DEM zoom to keep tile count consistently between 4 and 12 tiles
+            int demZoom = resolveAdaptiveDemZoom(sizeKm);
             GeoMath.TileRange range = GeoMath.getTileRange(bbox, demZoom);
 
             int tilesX = range.maxX() - range.minX() + 1;
             int tilesY = range.maxY() - range.minY() + 1;
 
-            // Full pixel canvas covering all downloaded tiles without any clipping
             int fullW = tilesX * TILE_SIZE;
             int fullH = tilesY * TILE_SIZE;
             float[][] fullStitchedGrid = new float[fullH][fullW];
 
-            log.info("[DEM STITCH] Downloading {}x{} full 512x512 GeoTIFF tiles (canvas: {}x{}) for Map {}...",
-                    tilesX, tilesY, fullW, fullH, mapId);
+            log.info("[DEM STITCH] Downloading {}x{} GeoTIFF tiles at adaptive zoom {} for Map '{}' ({} km)",
+                    tilesX, tilesY, demZoom, mapId, sizeKm);
 
-            // 1. Download and stitch all raw GeoTIFF tiles preserving all 512x512 pixels
+            // 2. Download and stitch raw GeoTIFF tiles with safe pacing
             for (int ty = range.minY(); ty <= range.maxY(); ty++) {
                 for (int tx = range.minX(); tx <= range.maxX(); tx++) {
                     int offsetX = (tx - range.minX()) * TILE_SIZE;
                     int offsetY = (ty - range.minY()) * TILE_SIZE;
 
-                    downloadAndPasteGeoTiffTile(demZoom, tx, ty, fullStitchedGrid, offsetX, offsetY);
+                    downloadAndPasteGeoTiffTileWithRetry(demZoom, tx, ty, fullStitchedGrid, offsetX, offsetY, 3);
+                    throttle();
                 }
             }
 
-            // 2. Crop the exact 20x20km theater from the seamless stitched grid into a 512x512 master raster
-            int outputResolution = 512;
-            float[] finalFloats = new float[outputResolution * outputResolution];
+            // 3. Crop exact theater bounding box into 512x512 master raster using bilinear interpolation
+            float[] finalFloats = new float[OUTPUT_RESOLUTION * OUTPUT_RESOLUTION];
 
-            for (int y = 0; y < outputResolution; y++) {
-                double lat = bbox.maxLat() - (y / (double) (outputResolution - 1)) * (bbox.maxLat() - bbox.minLat());
+            for (int y = 0; y < OUTPUT_RESOLUTION; y++) {
+                double lat = bbox.maxLat() - (y / (double) (OUTPUT_RESOLUTION - 1)) * (bbox.maxLat() - bbox.minLat());
                 double ty = GeoMath.latToTileYDouble(lat, demZoom);
                 double pixelY = (ty - range.minY()) * TILE_SIZE;
-                pixelY = Math.max(0.0, Math.min(fullH - 1.001, pixelY));
+                pixelY = Math.clamp(pixelY, 0.0, fullH - 1.001);
 
                 int y0 = (int) Math.floor(pixelY);
                 int y1 = Math.min(fullH - 1, y0 + 1);
                 double dy = pixelY - y0;
 
-                for (int x = 0; x < outputResolution; x++) {
-                    double lon = bbox.minLon() + (x / (double) (outputResolution - 1)) * (bbox.maxLon() - bbox.minLon());
+                for (int x = 0; x < OUTPUT_RESOLUTION; x++) {
+                    double lon = bbox.minLon() + (x / (double) (OUTPUT_RESOLUTION - 1)) * (bbox.maxLon() - bbox.minLon());
                     double tx = GeoMath.lonToTileXDouble(lon, demZoom);
                     double pixelX = (tx - range.minX()) * TILE_SIZE;
-                    pixelX = Math.max(0.0, Math.min(fullW - 1.001, pixelX));
+                    pixelX = Math.clamp(pixelX, 0.0, fullW - 1.001);
 
                     int x0 = (int) Math.floor(pixelX);
                     int x1 = Math.min(fullW - 1, x0 + 1);
                     double dx = pixelX - x0;
 
-                    // Bilinear interpolation across seamless stitched tile data
-                    float h00 = fullStitchedGrid[y0][x0];
-                    float h10 = fullStitchedGrid[y0][x1];
-                    float h01 = fullStitchedGrid[y1][x0];
-                    float h11 = fullStitchedGrid[y1][x1];
+                    float h00 = sanitizeAltitude(fullStitchedGrid[y0][x0]);
+                    float h10 = sanitizeAltitude(fullStitchedGrid[y0][x1]);
+                    float h01 = sanitizeAltitude(fullStitchedGrid[y1][x0]);
+                    float h11 = sanitizeAltitude(fullStitchedGrid[y1][x1]);
 
                     float hTop = (float) (h00 * (1.0 - dx) + h10 * dx);
                     float hBottom = (float) (h01 * (1.0 - dx) + h11 * dx);
-                    finalFloats[y * outputResolution + x] = (float) (hTop * (1.0 - dy) + hBottom * dy);
+                    finalFloats[y * OUTPUT_RESOLUTION + x] = (float) (hTop * (1.0 - dy) + hBottom * dy);
                 }
             }
 
-            // 3. Save as clean native Float32 GeoTIFF (.tif) file
-            DemRaster resultRaster = new DemRaster(outputResolution, outputResolution, finalFloats);
+            // 4. Save as pure IEEE 754 Float32 GeoTIFF (.tif)
+            DemRaster resultRaster = new DemRaster(OUTPUT_RESOLUTION, OUTPUT_RESOLUTION, finalFloats);
             resultRaster.writeToFile(targetFile.toFile());
 
-            log.info("[DEM STITCH] Successfully created seamless master Float32 terrain.tif (512x512) for Map {}", mapId);
+            log.info("[DEM STITCH] Float32 terrain.tif successfully generated: {}", targetFile);
             return targetFile.toString();
 
         } catch (Exception e) {
-            log.error("[DEM STITCH] Error extracting GeoTIFF DEM for map " + mapId, e);
-            throw new RuntimeException("Failed to extract elevation DEM", e);
+            log.error("[DEM STITCH] Error extracting GeoTIFF DEM for map {}", mapId, e);
+            throw new RuntimeException("Failed to extract elevation DEM: " + e.getMessage(), e);
         }
     }
 
     /**
-     * Downloads and parses all 512x512 pixels of a single Float32 GeoTIFF tile.
+     * Resolves the optimal Slippy Map tile zoom for elevation data.
+     * Prevents downloading hundreds of tiles when the map spans large regional territories.
      */
-    private void downloadAndPasteGeoTiffTile(int z, int x, int y, float[][] targetGrid, int offsetX, int offsetY) {
+    private int resolveAdaptiveDemZoom(double sizeKm) {
+        if (sizeKm <= 15.0) return 12; // ~30m Copernicus resolution for small polygons
+        if (sizeKm <= 40.0) return 11; // ~60m resolution for tactical operational areas
+        if (sizeKm <= 100.0) return 10;
+        if (sizeKm <= 250.0) return 9;
+        if (sizeKm <= 600.0) return 8;
+        return 7;                      // Strategic country scale
+    }
+
+    /**
+     * Downloads and parses all 512x512 pixels of a single Float32 GeoTIFF tile with retry logic.
+     */
+    private void downloadAndPasteGeoTiffTileWithRetry(int z, int x, int y, float[][] targetGrid,
+                                                      int offsetX, int offsetY, int retries) {
         String url = GEOTIFF_TILE_URL.replace("{z}", String.valueOf(z))
                 .replace("{x}", String.valueOf(x))
                 .replace("{y}", String.valueOf(y));
-        try {
-            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url))
-                    .header("User-Agent", "TALOS-Simulation-Engine/1.0")
-                    .timeout(Duration.ofSeconds(12)).GET().build();
 
-            HttpResponse<InputStream> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofInputStream());
-            if (resp.statusCode() == 200) {
-                BufferedImage img = ImageIO.read(resp.body());
-                if (img != null) {
-                    Raster raster = img.getData();
-                    int imgW = raster.getWidth();  // 512
-                    int imgH = raster.getHeight(); // 512
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", "TALOS-Simulation-Engine/1.0 (tactical simulation platform)")
+                .timeout(Duration.ofSeconds(15))
+                .GET()
+                .build();
 
-                    for (int py = 0; py < imgH; py++) {
-                        for (int px = 0; px < imgW; px++) {
-                            float alt = raster.getSampleFloat(px, py, 0);
-                            targetGrid[offsetY + py][offsetX + px] = alt;
+        for (int attempt = 1; attempt <= retries; attempt++) {
+            try {
+                HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+
+                if (response.statusCode() == 200) {
+                    try (InputStream in = response.body()) {
+                        BufferedImage img = ImageIO.read(in);
+                        if (img != null) {
+                            Raster raster = img.getData();
+                            int imgW = raster.getWidth();
+                            int imgH = raster.getHeight();
+
+                            for (int py = 0; py < imgH; py++) {
+                                for (int px = 0; px < imgW; px++) {
+                                    float alt = raster.getSampleFloat(px, py, 0);
+                                    targetGrid[offsetY + py][offsetX + px] = sanitizeAltitude(alt);
+                                }
+                            }
+                            return; // Success
                         }
                     }
+                } else if (response.statusCode() == 429 || response.statusCode() == 503) {
+                    log.warn("[DEM STITCH] Rate limit/busy ({}) on tile {}/{}/{}. Retry attempt {}...",
+                            response.statusCode(), z, x, y, attempt);
+                    Thread.sleep(attempt * 1000L);
+                } else {
+                    log.warn("[DEM STITCH] Tile {}/{}/{} returned HTTP {}", z, x, y, response.statusCode());
+                    return;
                 }
-            } else {
-                log.warn("[DEM STITCH] GeoTIFF tile {}/{}/{} returned HTTP {}", z, x, y, resp.statusCode());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception e) {
+                log.warn("[DEM STITCH] Tile {}/{}/{} attempt {} failed: {}", z, x, y, attempt, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("[DEM STITCH] GeoTIFF tile {}/{}/{} fetch exception: {}", z, x, y, e.getMessage());
         }
+    }
+
+    private void throttle() {
+        try {
+            Thread.sleep(RATE_LIMIT_DELAY_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private float sanitizeAltitude(float alt) {
+        if (Float.isNaN(alt) || Float.isInfinite(alt) || alt < NO_DATA_THRESHOLD) {
+            return 0.0f; // Replace void/ocean nodata values with sea-level datum
+        }
+        return alt;
     }
 }

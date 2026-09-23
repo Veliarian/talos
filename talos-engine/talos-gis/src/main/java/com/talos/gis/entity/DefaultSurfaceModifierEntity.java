@@ -1,27 +1,29 @@
-package com.talos.model.entity;
+package com.talos.gis.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Map-specific movement and concealment modifier for tactical surfaces and roads.
+ * Baseline reference template entity for default terrain surface modifiers.
  */
-@Data
+@Getter
+@Setter
+@NoArgsConstructor
 @Entity
-@Table(name = "map_surface_modifiers")
-public class MapSurfaceModifierEntity {
+@Table(name = "default_surface_modifiers")
+public class DefaultSurfaceModifierEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "map_id", nullable = false)
-    private MapEntity map;
-
     @Column(nullable = false)
-    private String category; // 'ROAD', 'VEGETATION', 'WATER', 'SOIL'
+    private String category;
 
     @Column(name = "osm_key", nullable = false)
     private String osmKey;
@@ -42,4 +44,16 @@ public class MapSurfaceModifierEntity {
 
     @Column(name = "cover_defense_percent", nullable = false)
     private float coverDefensePercent;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof DefaultSurfaceModifierEntity that)) return false;
+        return id != null && Objects.equals(id, that.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return getClass().hashCode();
+    }
 }
