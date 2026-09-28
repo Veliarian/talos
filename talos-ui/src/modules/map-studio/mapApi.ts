@@ -4,7 +4,8 @@ import type {
     SurfaceModifierDto,
     TerrainSculptRequest,
     TerrainSculptResponse,
-    GeoJsonFeatureCollection, FeatureUpdateRequestDto, DefaultModifierDto
+    GeoJsonFeatureCollection, FeatureUpdateRequestDto, DefaultModifierDto, TerrainHistoryStatus,
+    LineTerrainSculptRequest
 } from './types';
 
 // Relative API path handled transparently via Vite reverse proxy in development
@@ -163,5 +164,47 @@ export const mapApi = {
             method: 'POST'
         });
         if (!res.ok) throw new Error(`Failed to apply template ${templateId} to map ${mapId}`);
-    }
+    },
+
+    /**
+     * Sculpt terrain along a linear vector trajectory (A -> B).
+     */
+    async sculptTerrainLine(mapId: string, request: LineTerrainSculptRequest): Promise<{ status: string }> {
+        const res = await fetch(`${API_BASE}/${mapId}/terrain/sculpt-line`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request)
+        });
+        if (!res.ok) throw new Error('Failed to execute linear terrain sculpt');
+        return res.json();
+    },
+
+    /**
+     * Undo last elevation modification.
+     */
+    async undoTerrain(mapId: string): Promise<void> {
+        const res = await fetch(`${API_BASE}/${mapId}/terrain/undo`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to undo elevation sculpt');
+    },
+
+    /**
+     * Redo last reverted elevation modification.
+     */
+    async redoTerrain(mapId: string): Promise<void> {
+        const res = await fetch(`${API_BASE}/${mapId}/terrain/redo`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to redo elevation sculpt');
+    },
+
+    /**
+     * Fetch active Undo/Redo availability status.
+     */
+    async getTerrainHistoryStatus(mapId: string): Promise<TerrainHistoryStatus> {
+        const res = await fetch(`${API_BASE}/${mapId}/terrain/history-status`);
+        if (!res.ok) return { canUndo: false, canRedo: false };
+        return res.json();
+    },
 };

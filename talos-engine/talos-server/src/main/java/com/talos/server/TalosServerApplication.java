@@ -10,8 +10,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableScheduling
 @ComponentScan(basePackages = "com.talos")
-@EnableJpaRepositories(basePackages = "com.talos.gis.repository")
-@EntityScan(basePackages = {"com.talos.gis.entity", "com.talos.model.entity"})
+@EnableJpaRepositories(basePackages = "com.talos")
+@EntityScan(basePackages = {"com.talos"})
 public class TalosServerApplication {
 
     public static void main(String[] args) {

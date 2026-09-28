@@ -1,7 +1,7 @@
 package com.talos.core;
 
-import com.talos.gis.service.RoadService;
-import com.talos.gis.service.TerrainService;
+import com.talos.gis.editing.features.service.RoadService;
+import com.talos.gis.editing.elevation.service.TerrainService;
 import com.talos.model.domain.Unit;
 import com.talos.model.dto.c2.CommandDto;
 import org.slf4j.Logger;

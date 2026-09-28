@@ -3,6 +3,8 @@ export type MapStatus = 'CREATED' | 'DOWNLOADING' | 'READY' | 'FAILED';
 export type ModifierCategory = 'ROAD' | 'VEGETATION' | 'WATER' | 'SOIL' | 'BUILDING' | 'FORTIFICATION';
 export type SculptOperation = 'DIG' | 'RAISE' | 'FLATTEN';
 export type FeatureStatus = 'OPERATIONAL' | 'DESTROYED' | 'MINED' | 'CHECKPOINT';
+export type SculptMode = 'RADIAL' | 'LINEAR';
+export type LinearSculptOperation = 'TRENCH_DIG' | 'AT_DITCH' | 'BERM_RAISE';
 
 export interface MapLayerDto {
     id: string;
@@ -118,4 +120,19 @@ export interface DefaultModifierDto {
     speedModifierTracked: number;
     visibilityMeters: number | null;
     coverDefensePercent: number;
+}
+
+export interface LineTerrainSculptRequest {
+    startLat: number;
+    startLon: number;
+    endLat: number;
+    endLon: number;
+    widthMeters: number;
+    deltaMeters: number;
+    operation: LinearSculptOperation;
+}
+
+export interface TerrainHistoryStatus {
+    canUndo: boolean;
+    canRedo: boolean;
 }
