@@ -52,6 +52,8 @@
                     :active-highlight-type="activeHighlightType"
                     @highlight="highlightObjectsOnMap"
                     @apply-template="applyTemplateToCategory"
+                    @promote-to-template="handlePromoteToTemplate"
+                    @sync-all="handleSyncAllTemplates"
                 />
 
                 <!-- Panel 3: Basemap Textures -->
@@ -148,7 +150,9 @@ const {
     mountBaseLayer,
     applyLayerStack,
     loadVectors,
+    reapplyAllStyling,
     invalidateTerrainCache,
+    highlightCategoryObjects,
     destroyViewer
 } = useEditorMap(props.map);
 
@@ -208,20 +212,42 @@ onMounted(async () => {
     initViewer(canvasContainer.value);
 
     mountBaseLayer(currentLayerType.value);
-    onSelectWorkspaceTab('ELEVATION');
+    onSelectWorkspaceTab('OBJECTS');
 
     try {
-        const vectors = await mapApi.getMapVectors(props.map.id);
-        await loadVectors(vectors);
         modifiers.value = await mapApi.getModifiers(props.map.id);
         availableTemplates.value = await mapApi.getTemplates();
+        const vectors = await mapApi.getMapVectors(props.map.id);
+        await loadVectors(vectors, modifiers.value);
     } catch (err) {
+        console.warn('Initial data load error:', err);
         console.warn('Initial data load error:', err);
     }
 
     setupInteractions();
     await refreshHistory();
 });
+
+const handlePromoteToTemplate = async (mod: TacticalModifierData) => {
+    try {
+        await mapApi.promoteModifierToTemplate(props.map.id, mod.id);
+        availableTemplates.value = await mapApi.getTemplates();
+        alert(`Тип "${mod.osmKey}=${mod.osmValue}" успішно збережено в Головний Довідник!`);
+    } catch (err) {
+        alert('Помилка збереження в довідник: ' + err);
+    }
+};
+
+const handleSyncAllTemplates = async () => {
+    try {
+        const res = await mapApi.syncMapTemplates(props.map.id);
+        modifiers.value = await mapApi.getModifiers(props.map.id);
+        reapplyAllStyling(modifiers.value);
+        alert(`Синхронізовано ${res.syncedCount} типів об'єктів з Головним Довідником!`);
+    } catch (err) {
+        alert('Помилка синхронізації: ' + err);
+    }
+};
 
 const setupInteractions = () => {
     const v = viewer.value;
@@ -332,14 +358,25 @@ const setupInteractions = () => {
 };
 
 const highlightObjectsOnMap = (mod: TacticalModifierData) => {
-    activeHighlightType.value = mod.osmValue;
-    // Map highlights logic
+    // If clicking the same item, toggle off highlight
+    if (activeHighlightType.value === mod.osmValue) {
+        activeHighlightType.value = null;
+        highlightCategoryObjects(null);
+    } else {
+        activeHighlightType.value = mod.osmValue;
+        highlightCategoryObjects(mod.osmValue);
+    }
 };
 
 const applyTemplateToCategory = async (mod: TacticalModifierData, templateId: string) => {
-    await mapApi.applyTemplateToMap(props.map.id, templateId);
-    modifiers.value = await mapApi.getModifiers(props.map.id);
-    alert('Шаблон успішно застосовано!');
+    try {
+        await mapApi.applyTemplateToMap(props.map.id, mod.id, templateId);
+        modifiers.value = await mapApi.getModifiers(props.map.id);
+        reapplyAllStyling(modifiers.value);
+        alert(`Шаблон успішно застосовано до: ${mod.osmValue}`);
+    } catch (err) {
+        alert('Помилка застосування шаблону: ' + err);
+    }
 };
 
 const applyTemplateToFeature = (templateId: string) => {

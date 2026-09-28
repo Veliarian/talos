@@ -8,8 +8,12 @@ public record SurfaceTemplateResponse(
         String osmKey,
         String osmValue,
         String description,
+        int movementPriority,
+        String color2d,
+        String texture3d,
         float speedModifierWheeled,
         float speedModifierTracked,
         Float visibilityMeters,
-        float coverDefensePercent
+        float coverDefensePercent,
+        String propertiesJson
 ) {}

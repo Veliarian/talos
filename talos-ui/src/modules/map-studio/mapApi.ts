@@ -4,8 +4,12 @@ import type {
     SurfaceModifierDto,
     TerrainSculptRequest,
     TerrainSculptResponse,
-    GeoJsonFeatureCollection, FeatureUpdateRequestDto, DefaultModifierDto, TerrainHistoryStatus,
-    LineTerrainSculptRequest
+    GeoJsonFeatureCollection,
+    FeatureUpdateRequestDto,
+    TerrainHistoryStatus,
+    LineTerrainSculptRequest,
+    SurfaceTemplateResponse,
+    SurfaceTemplateRequest, TacticalModifierData
 } from './types';
 
 // Relative API path handled transparently via Vite reverse proxy in development
@@ -43,15 +47,6 @@ export const mapApi = {
             body: JSON.stringify(request)
         });
         if (!res.ok) throw new Error('Failed to initiate map creation');
-        return res.json();
-    },
-
-    /**
-     * Fetch surface modifiers for a specific map.
-     */
-    async getModifiers(mapId: string): Promise<SurfaceModifierDto[]> {
-        const res = await fetch(`${API_BASE}/${mapId}/modifiers`);
-        if (!res.ok) throw new Error(`Failed to fetch surface modifiers for map: ${mapId}`);
         return res.json();
     },
 
@@ -112,61 +107,6 @@ export const mapApi = {
     },
 
     /**
-     * Fetch all global doctrine templates from library.
-     */
-    async getTemplates(): Promise<DefaultModifierDto[]> {
-        const res = await fetch(`${API_BASE}/templates`);
-        if (!res.ok) throw new Error('Failed to fetch global surface templates');
-        return res.json();
-    },
-
-    /**
-     * Create a new global template in doctrine catalog.
-     */
-    async createTemplate(dto: Partial<DefaultModifierDto>): Promise<DefaultModifierDto> {
-        const res = await fetch(`${API_BASE}/templates`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(dto)
-        });
-        if (!res.ok) throw new Error('Failed to create template');
-        return res.json();
-    },
-
-    /**
-     * Update an existing global template.
-     */
-    async updateTemplate(id: string, dto: DefaultModifierDto): Promise<DefaultModifierDto> {
-        const res = await fetch(`${API_BASE}/templates/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(dto)
-        });
-        if (!res.ok) throw new Error(`Failed to update template ${id}`);
-        return res.json();
-    },
-
-    /**
-     * Delete a global template from library.
-     */
-    async deleteTemplate(id: string): Promise<void> {
-        const res = await fetch(`${API_BASE}/templates/${id}`, {
-            method: 'DELETE'
-        });
-        if (!res.ok) throw new Error(`Failed to delete template ${id}`);
-    },
-
-    /**
-     * Apply a global template to a specific theater map.
-     */
-    async applyTemplateToMap(mapId: string, templateId: string): Promise<void> {
-        const res = await fetch(`${API_BASE}/${mapId}/apply-template/${templateId}`, {
-            method: 'POST'
-        });
-        if (!res.ok) throw new Error(`Failed to apply template ${templateId} to map ${mapId}`);
-    },
-
-    /**
      * Sculpt terrain along a linear vector trajectory (A -> B).
      */
     async sculptTerrainLine(mapId: string, request: LineTerrainSculptRequest): Promise<{ status: string }> {
@@ -206,5 +146,81 @@ export const mapApi = {
         const res = await fetch(`${API_BASE}/${mapId}/terrain/history-status`);
         if (!res.ok) return { canUndo: false, canRedo: false };
         return res.json();
+    },
+
+    /**
+     * Reorders template priorities (orderedIds: index 0 is highest priority).
+     */
+    async reorderTemplates(orderedIds: string[]): Promise<void> {
+        const res = await fetch(`${API_BASE}/templates/reorder`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderedIds })
+        });
+        if (!res.ok) throw new Error('Failed to reorder templates');
+    },
+
+    /**
+     * Promotes an object type discovered on a specific map into the Master Doctrine Catalog.
+     */
+    async promoteModifierToTemplate(mapId: string, modifierId: string): Promise<SurfaceTemplateResponse> {
+        const res = await fetch(`${API_BASE}/${mapId}/modifiers/${modifierId}/promote`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error('Failed to promote modifier to master template');
+        return res.json();
+    },
+
+    /**
+     * Auto-sync all features on a map with matching global templates.
+     */
+    async syncMapTemplates(mapId: string): Promise<{ syncedCount: number }> {
+        const res = await fetch(`${API_BASE}/${mapId}/sync-templates`, { method: 'POST' });
+        if (!res.ok) throw new Error('Failed to auto-sync templates with map');
+        return res.json();
+    },
+
+    async getTemplates(): Promise<SurfaceTemplateResponse[]> {
+        const res = await fetch(`${API_BASE}/templates`);
+        if (!res.ok) throw new Error('Failed to fetch templates');
+        return res.json();
+    },
+
+    async createTemplate(payload: SurfaceTemplateRequest): Promise<SurfaceTemplateResponse> {
+        const res = await fetch(`${API_BASE}/templates`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Failed to create template');
+        return res.json();
+    },
+
+    async updateTemplate(id: string, payload: SurfaceTemplateRequest): Promise<SurfaceTemplateResponse> {
+        const res = await fetch(`${API_BASE}/templates/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(`Failed to update template: ${id}`);
+        return res.json();
+    },
+
+    async deleteTemplate(id: string): Promise<void> {
+        const res = await fetch(`${API_BASE}/templates/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`Failed to delete template: ${id}`);
+    },
+
+    async getModifiers(mapId: string): Promise<TacticalModifierData[]> {
+        const res = await fetch(`${API_BASE}/${mapId}/modifiers`);
+        if (!res.ok) throw new Error(`Failed to fetch modifiers for map: ${mapId}`);
+        return res.json();
+    },
+
+    async applyTemplateToMap(mapId: string, modifierId: string, templateId: string): Promise<void> {
+        const res = await fetch(`${API_BASE}/${mapId}/modifiers/${modifierId}/apply-template/${templateId}`, {
+            method: 'POST'
+        });
+        if (!res.ok) throw new Error(`Failed to apply template: ${templateId}`);
     },
 };

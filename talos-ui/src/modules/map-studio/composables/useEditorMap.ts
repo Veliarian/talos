@@ -18,7 +18,7 @@ import {
     CallbackProperty,
     Material
 } from 'cesium';
-import type { MapDetailDto, FeatureStatus } from '../types';
+import type {MapDetailDto, FeatureStatus, TacticalModifierData} from '../types';
 
 export function useEditorMap(map: MapDetailDto) {
     // shallowRef prevents Vue from creating deep reactive proxies over massive Cesium internals
@@ -266,67 +266,115 @@ export function useEditorMap(map: MapDetailDto) {
         }
     };
 
-    const applyEntityStyling = (entity: Entity) => {
+    // Color material cache by hex code to keep rendering fast and batched
+    const colorMaterialCache = new Map<string, ColorMaterialProperty>();
+    const getDynamicMaterial = (hexColor: string, alpha: number) => {
+        const key = `${hexColor}_${alpha}`;
+        if (!colorMaterialCache.has(key)) {
+            colorMaterialCache.set(key, new ColorMaterialProperty(Color.fromCssColorString(hexColor).withAlpha(alpha)));
+        }
+        return colorMaterialCache.get(key)!;
+    };
+
+    const applyEntityStyling = (entity: Entity, modifiersList: TacticalModifierData[] = []) => {
         const category = entity.properties?.category?.getValue();
         const status = entity.properties?.status?.getValue() as FeatureStatus | undefined;
-        const typeKey = entity.properties?.typeKey?.getValue();
         const typeValue = entity.properties?.typeValue?.getValue();
 
-        if (category === 'ROAD' && entity.polyline) {
-            if (typeKey === 'railway') {
-                entity.polyline.material = MAT_RAILWAY;
-                entity.polyline.width = CONST_WIDTH_RAILWAY;
-                return;
-            }
-            if (status === 'DESTROYED') entity.polyline.material = MAT_ROAD_DESTROYED;
-            else if (status === 'MINED') entity.polyline.material = MAT_ROAD_MINED;
-            else if (status === 'CHECKPOINT') {
+        // 1. Check if map has a configured color for this type
+        const matchedMod = modifiersList.find(m => m.osmValue === typeValue);
+        const customColorHex = matchedMod?.color2d;
+
+        // Status overrides take precedence (destroyed, mined, checkpoint)
+        if (status === 'DESTROYED') {
+            if (entity.polyline) entity.polyline.material = MAT_ROAD_DESTROYED;
+            if (entity.polygon) entity.polygon.material = MAT_SOIL;
+            return;
+        }
+        if (status === 'MINED') {
+            if (entity.polyline) entity.polyline.material = MAT_ROAD_MINED;
+            if (entity.polygon) entity.polygon.material = MAT_ROAD_MINED;
+            return;
+        }
+        if (status === 'CHECKPOINT') {
+            if (entity.polyline) {
                 entity.polyline.material = MAT_ROAD_CHECKPOINT;
                 entity.polyline.width = CONST_WIDTH_CHECKPOINT;
-                return;
-            } else {
-                entity.polyline.material = MAT_ROAD;
             }
+            return;
+        }
+
+        // 2. Dynamic styling from database template color2d
+        if (entity.polyline) {
+            const roadColor = customColorHex || '#f59e0b';
+            entity.polyline.material = getDynamicMaterial(roadColor, 0.9);
             entity.polyline.width = CONST_WIDTH_ROAD;
             return;
         }
 
-        if (category === 'WATER') {
-            if (entity.polyline) {
-                entity.polyline.material = MAT_WATER_LINE;
-                entity.polyline.width = CONST_WIDTH_STREAM;
-            } else if (entity.polygon) {
-                entity.polygon.material = MAT_WATER_POLYGON;
-                entity.polygon.outline = CONST_OUTLINE_FALSE as any;
-            }
-            return;
-        }
-
-        if (category === 'VEGETATION' && entity.polygon) {
-            entity.polygon.material = (typeValue === 'wood' || typeValue === 'forest') ? MAT_FOREST : MAT_MEADOW;
-            entity.polygon.outline = CONST_OUTLINE_FALSE as any;
-            return;
-        }
-
-        if (category === 'BUILDING' && entity.polygon) {
-            entity.polygon.material = (typeValue === 'residential' || typeValue === 'industrial') ? MAT_SETTLEMENT : MAT_BUILDING;
-            entity.polygon.outline = CONST_OUTLINE_FALSE as any;
-            return;
-        }
-
         if (entity.polygon) {
-            entity.polygon.material = MAT_SOIL;
+            // Default fallbacks if color is not configured yet
+            let defaultColor = '#15803d'; // Green for vegetation
+            if (category === 'WATER' || category === 'RIVER' || category === 'OPEN_WATER') defaultColor = '#0284c7';
+            else if (category === 'BUILDING') defaultColor = '#ef4444';
+            else if (category === 'SOIL') defaultColor = '#475569';
+
+            const polyColor = customColorHex || defaultColor;
+            const alpha = (category === 'BUILDING') ? 0.75 : 0.45;
+
+            entity.polygon.material = getDynamicMaterial(polyColor, alpha);
             entity.polygon.outline = CONST_OUTLINE_FALSE as any;
         }
     };
 
-    const loadVectors = async (geoJson: any) => {
+    const loadVectors = async (geoJson: any, modifiersList: TacticalModifierData[] = []) => {
         if (!viewer.value) return;
+        if (vectorDataSource) {
+            viewer.value.dataSources.remove(vectorDataSource);
+        }
         vectorDataSource = await GeoJsonDataSource.load(geoJson, { clampToGround: true });
         for (const entity of vectorDataSource.entities.values) {
-            applyEntityStyling(entity);
+            applyEntityStyling(entity, modifiersList);
         }
         viewer.value.dataSources.add(vectorDataSource);
+    };
+
+    const reapplyAllStyling = (modifiersList: TacticalModifierData[]) => {
+        if (!vectorDataSource) return;
+        for (const entity of vectorDataSource.entities.values) {
+            applyEntityStyling(entity, modifiersList);
+        }
+    };
+
+    const highlightCategoryObjects = (osmValue: string | null) => {
+        if (!vectorDataSource) return;
+        const entities = vectorDataSource.entities.values;
+
+        for (const entity of entities) {
+            if (!osmValue) {
+                // Restore standard layer coloring
+                applyEntityStyling(entity);
+            } else {
+                const isMatch = (entity.properties?.typeValue?.getValue() === osmValue);
+                if (isMatch) {
+                    // Highlight selected category with glowing Cyan
+                    if (entity.polyline) {
+                        entity.polyline.material = new ColorMaterialProperty(Color.fromCssColorString('#00ffff'));
+                        entity.polyline.width = new ConstantProperty(6.0);
+                    } else if (entity.polygon) {
+                        entity.polygon.material = new ColorMaterialProperty(Color.fromCssColorString('#00ffff').withAlpha(0.65));
+                    }
+                } else {
+                    // Dim unselected objects
+                    if (entity.polyline) {
+                        entity.polyline.material = new ColorMaterialProperty(Color.fromCssColorString('#475569').withAlpha(0.25));
+                        entity.polyline.width = new ConstantProperty(2.0);
+                    } else if (entity.polygon) {
+                        entity.polygon.material = new ColorMaterialProperty(Color.fromCssColorString('#1e293b').withAlpha(0.15));
+                    }
+                }
+            }
+        }
     };
 
     const destroyViewer = () => {
@@ -350,8 +398,10 @@ export function useEditorMap(map: MapDetailDto) {
         mountBaseLayer,
         applyLayerStack,
         applyEntityStyling,
+        highlightCategoryObjects,
         loadVectors,
         invalidateTerrainCache,
+        reapplyAllStyling,
         destroyViewer
     };
 }

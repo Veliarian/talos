@@ -1,10 +1,132 @@
 export type LayerType = 'SATELLITE' | 'TOPOGRAPHIC' | 'TACTICAL';
 export type MapStatus = 'CREATED' | 'DOWNLOADING' | 'READY' | 'FAILED';
-export type ModifierCategory = 'ROAD' | 'VEGETATION' | 'WATER' | 'SOIL' | 'BUILDING' | 'FORTIFICATION';
 export type SculptOperation = 'DIG' | 'RAISE' | 'FLATTEN';
 export type FeatureStatus = 'OPERATIONAL' | 'DESTROYED' | 'MINED' | 'CHECKPOINT';
 export type SculptMode = 'RADIAL' | 'LINEAR';
 export type LinearSculptOperation = 'TRENCH_DIG' | 'AT_DITCH' | 'BERM_RAISE';
+export type ModifierCategory =
+    | 'ROAD'
+    | 'BRIDGE'
+    | 'RIVER'
+    | 'OPEN_WATER'
+    | 'VEGETATION'
+    | 'BUILDING'
+    | 'SOIL';
+
+// Category-specific properties
+export interface RoadProps {
+    surfaceType: string;
+    widthMeters: number;
+    lanesCount: number;
+    isOneWay: boolean;
+    infantryOnly: boolean;
+    coverDefensePercent: number;
+}
+
+export interface BridgeProps {
+    bridgeType: string;
+    maxWeightTons: number;
+    widthMeters: number;
+    lengthMeters: number;
+    lanesCount: number;
+    coverDefensePercent: number;
+    destructionState: string;
+}
+
+export interface RiverProps {
+    waterwayType: string;
+    depthMeters: number;
+    widthMeters: number;
+    flowSpeedMps: number;
+    flowDirectionDegrees: number;
+    bottomType: string;
+    isFordable: boolean;
+    maxFordDepthMeters: number;
+    speedModifierAmphibious: number;
+}
+
+export interface OpenWaterProps {
+    waterBodyType: string;
+    depthMeters: number;
+    bottomType: string;
+    reedBeltWidthMeters: number;
+    speedModifierAmphibious: number;
+    iceCoverState: string;
+}
+
+export interface VegetationProps {
+    vegetationType: string;
+    heightMeters: number;
+    stemDiameterCm: number;
+    densityPercent: number;
+    visibilityMeters: number | null;
+    coverDefensePercent: number;
+    speedModifierInfantry: number;
+}
+
+export interface BuildingProps {
+    buildingType: string;
+    structureMaterial: string;
+    buildingLevels: number;
+    heightMeters: number;
+    coverDefensePercent: number;
+    canEnterUnits: boolean;
+    roofType: string;
+}
+
+export interface SoilProps {
+    soilType: string;
+    bearingCapacity: string;
+    dustGeneration: string;
+    coverDefensePercent: number;
+}
+
+export interface SurfaceTemplateResponse {
+    id: string;
+    category: ModifierCategory;
+    osmKey: string;
+    osmValue: string;
+    description: string;
+    movementPriority: number;
+    color2d: string;
+    texture3d: string;
+    speedModifierWheeled: number;
+    speedModifierTracked: number;
+    visibilityMeters: number | null;
+    coverDefensePercent: number;
+    propertiesJson?: string | null;
+}
+
+export interface SurfaceTemplateRequest {
+    category: ModifierCategory;
+    osmKey: string;
+    osmValue: string;
+    description: string;
+    movementPriority: number;
+    color2d: string;
+    texture3d: string;
+    speedModifierWheeled: number;
+    speedModifierTracked: number;
+    visibilityMeters: number | null;
+    coverDefensePercent: number;
+    propertiesJson: string;
+}
+
+export interface TacticalModifierData {
+    id: string;
+    category: ModifierCategory;
+    osmKey: string;
+    osmValue: string;
+    description: string;
+    movementPriority: number;
+    color2d: string;
+    texture3d: string;
+    speedModifierWheeled: number;
+    speedModifierTracked: number;
+    visibilityMeters: number | null;
+    coverDefensePercent: number;
+    propertiesJson?: string | null;
+}
 
 export interface MapLayerDto {
     id: string;

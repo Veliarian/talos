@@ -6,7 +6,7 @@
             :maps="maps"
             @create-new="currentScreen = 'creator'"
             @open-map="openEditor"
-            @open-catalog="openCatalogModal = true"
+            @open-catalog="currentScreen = 'database'"
             @delete-map="onDeleteMap"
         />
 
@@ -25,6 +25,12 @@
             @launch-sim="$emit('switch-to-sim')"
         />
 
+        <!-- 4. Global Master Object Database Studio Screen -->
+        <ObjectDatabaseStudioView
+            v-else-if="currentScreen === 'database'"
+            @back="currentScreen = 'hub'"
+        />
+
         <!-- Global Catalog Modal (Accessible from Hub) -->
         <GlobalTemplateCatalogModal
             v-if="openCatalogModal"
@@ -41,13 +47,14 @@ import MapHubView from '@/modules/map-studio/views/MapHubView.vue';
 import MapCreatorView from '@/modules/map-studio/views/MapCreatorView.vue';
 import MapEditorView from '@/modules/map-studio/views/MapEditorView.vue';
 import GlobalTemplateCatalogModal from '../components/GlobalTemplateCatalogModal.vue';
+import ObjectDatabaseStudioView from "@/modules/map-studio/views/ObjectDatabaseStudioView.vue";
 
 defineEmits<{
     (e: 'switch-to-sim'): void;
 }>();
 
 // Active screen state: 'hub' | 'creator' | 'editor'
-const currentScreen = ref<'hub' | 'creator' | 'editor'>('hub');
+const currentScreen = ref<'hub' | 'creator' | 'editor' | 'database'>('hub');
 const maps = ref<MapDetailDto[]>([]);
 const selectedMap = ref<MapDetailDto | null>(null);
 const openCatalogModal = ref(false);

@@ -1,8 +1,6 @@
 package com.talos.server.controller.map;
 
-import com.talos.gis.editing.features.model.FeaturePatchRequest;
-import com.talos.gis.editing.features.model.SurfaceTemplateRequest;
-import com.talos.gis.editing.features.model.SurfaceTemplateResponse;
+import com.talos.gis.editing.features.model.*;
 import com.talos.gis.editing.features.service.TemplateModifierService;
 import com.talos.gis.editing.features.service.VectorFeatureService;
 import org.springframework.http.HttpStatus;
@@ -10,6 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -46,12 +45,13 @@ public class FeatureController {
         return updated ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 
-    @PostMapping("/{mapId}/apply-template/{templateId}")
-    public ResponseEntity<Void> applyTemplateToMap(
+    @PostMapping("/{mapId}/modifiers/{modifierId}/apply-template/{templateId}")
+    public ResponseEntity<Void> applyTemplateToModifier(
             @PathVariable UUID mapId,
+            @PathVariable UUID modifierId,
             @PathVariable UUID templateId) {
 
-        boolean applied = templateService.applyTemplateToMap(mapId, templateId);
+        boolean applied = templateService.applyTemplateToModifier(mapId, modifierId, templateId);
         return applied ? ResponseEntity.ok().build() : ResponseEntity.notFound().build();
     }
 
@@ -83,7 +83,7 @@ public class FeatureController {
     }
 
     @GetMapping("/{mapId}/modifiers")
-    public ResponseEntity<List<com.talos.gis.editing.features.model.TacticalModifierData>> getMapModifiers(
+    public ResponseEntity<List<TacticalModifierData>> getMapModifiers(
             @PathVariable UUID mapId) {
         return ResponseEntity.ok(templateService.getMapModifiers(mapId));
     }
@@ -92,9 +92,29 @@ public class FeatureController {
     public ResponseEntity<Void> updateModifier(
             @PathVariable UUID mapId,
             @PathVariable UUID modifierId,
-            @RequestBody com.talos.gis.editing.features.model.TacticalModifierData updateData) {
+            @RequestBody TacticalModifierData updateData) {
 
         boolean updated = templateService.updateMapModifier(modifierId, updateData);
         return updated ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    @PostMapping("/{mapId}/sync-templates")
+    public ResponseEntity<Map<String, Object>> autoSyncTemplates(@PathVariable UUID mapId) {
+        int synced = templateService.autoSyncMapWithTemplates(mapId);
+        return ResponseEntity.ok(Map.of("status", "SUCCESS", "syncedCount", synced));
+    }
+
+    @PutMapping("/templates/reorder")
+    public ResponseEntity<Void> reorderTemplates(@RequestBody PriorityReorderRequest request) {
+        templateService.reorderTemplates(request.orderedIds());
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/{mapId}/modifiers/{modifierId}/promote")
+    public ResponseEntity<SurfaceTemplateResponse> promoteToTemplate(
+            @PathVariable UUID mapId,
+            @PathVariable UUID modifierId) {
+
+        return ResponseEntity.ok(templateService.promoteMapModifierToTemplate(mapId, modifierId));
     }
 }

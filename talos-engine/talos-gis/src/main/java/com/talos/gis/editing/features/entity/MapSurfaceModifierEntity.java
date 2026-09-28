@@ -50,6 +50,18 @@ public class MapSurfaceModifierEntity {
     @Column(name = "cover_defense_percent", nullable = false)
     private float coverDefensePercent;
 
+    @Column(name = "movement_priority", nullable = false)
+    private int movementPriority = 50;
+
+    @Column(name = "color_2d")
+    private String color2d = "#f59e0b";
+
+    @Column(name = "texture_3d")
+    private String texture3d = "default";
+
+    @Column(name = "properties", columnDefinition = "TEXT")
+    private String properties;
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

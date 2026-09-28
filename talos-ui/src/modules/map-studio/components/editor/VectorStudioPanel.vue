@@ -1,20 +1,24 @@
 <template>
     <div class="panel-card">
         <div class="panel-header">
-            <span class="panel-title">🏘️ ТАКТИЧНІ ОБ'ЄКТИ ТА ПРИЗНАЧЕННЯ ТТХ</span>
+            <span class="panel-title">🏘️ ТАКТИЧНІ ОБ'ЄКТИ КАРТИ</span>
+            <button type="button" class="btn-sync-all" @click="$emit('sync-all')">
+                ⚡ АВТО-СИНХРОНІЗАЦІЯ
+            </button>
         </div>
+
         <div class="panel-body">
             <!-- Category Filter Pills -->
             <div class="filter-pills-row">
                 <button
-                    v-for="cat in (['ALL', 'ROAD', 'VEGETATION', 'BUILDING', 'WATER'] as const)"
+                    v-for="cat in (['ALL', 'ROAD', 'BRIDGE', 'RIVER', 'OPEN_WATER', 'VEGETATION', 'BUILDING', 'SOIL'] as const)"
                     :key="cat"
                     type="button"
                     class="pill-btn"
                     :class="{ active: selectedCategory === cat }"
                     @click="selectedCategory = cat"
                 >
-                    {{ cat === 'ALL' ? 'ВСІ' : cat }}
+                    {{ cat }}
                 </button>
             </div>
 
@@ -30,6 +34,16 @@
                     <div class="card-top">
                         <span class="cat-pill" :class="mod.category.toLowerCase()">{{ mod.category }}</span>
                         <code class="osm-tag">{{ mod.osmKey }}={{ mod.osmValue }}</code>
+
+                        <!-- Promote to Global Catalog Button -->
+                        <button
+                            type="button"
+                            class="btn-promote"
+                            title="Зберегти цей тип у Головний Довідник шаблонів"
+                            @click.stop="$emit('promote-to-template', mod)"
+                        >
+                            📥 У довідник
+                        </button>
                     </div>
 
                     <div class="card-desc">{{ mod.description || 'Не налаштовано' }}</div>
@@ -79,17 +93,19 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue';
-import type { TacticalModifierData, DefaultModifierDto } from '../../types';
+import type { TacticalModifierData, SurfaceTemplateResponse } from '../../types';
 
 const props = defineProps<{
     modifiers: TacticalModifierData[];
-    availableTemplates: DefaultModifierDto[];
+    availableTemplates: SurfaceTemplateResponse[];
     activeHighlightType: string | null;
 }>();
 
 defineEmits<{
     (e: 'highlight', mod: TacticalModifierData): void;
     (e: 'apply-template', mod: TacticalModifierData, templateId: string): void;
+    (e: 'promote-to-template', mod: TacticalModifierData): void;
+    (e: 'sync-all'): void;
 }>();
 
 const selectedCategory = ref<string>('ALL');
@@ -103,14 +119,23 @@ const filteredModifiers = computed(() => {
 
 <style scoped>
 .panel-card { background: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 4px; overflow: hidden; }
-.panel-header { background: rgba(255, 255, 255, 0.04); padding: 10px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.panel-header {
+    background: rgba(255, 255, 255, 0.04); padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex; justify-content: space-between; align-items: center;
+}
 .panel-title { font-size: 11px; font-weight: bold; color: #00a8ff; font-family: monospace; }
+.btn-sync-all {
+    background: #047857; border: 1px solid #10b981; color: #fff; font-size: 9px;
+    font-weight: bold; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-family: monospace;
+}
+.btn-sync-all:hover { background: #059669; }
+
 .panel-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; font-family: monospace; }
 
 .filter-pills-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .pill-btn {
     background: #1e293b; border: 1px solid #334155; color: #94a3b8;
-    padding: 3px 6px; font-size: 9px; font-family: monospace; cursor: pointer; border-radius: 2px;
+    padding: 3px 6px; font-size: 8px; font-family: monospace; cursor: pointer; border-radius: 2px;
 }
 .pill-btn.active { background: #0284c7; border-color: #38bdf8; color: #fff; }
 
@@ -119,13 +144,16 @@ const filteredModifiers = computed(() => {
     background: rgba(0, 0, 0, 0.25); border: 1px solid #334155; border-radius: 3px; padding: 8px; cursor: pointer;
 }
 .mod-item-card.highlighted { border-color: #f1c40f; background: rgba(241, 196, 15, 0.1); }
-.card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
-.cat-pill { font-size: 8px; padding: 1px 4px; border-radius: 2px; font-weight: bold; }
-.cat-pill.road { background: #1e3a8a; color: #93c5fd; }
-.cat-pill.vegetation { background: #064e3b; color: #6ee7b7; }
-.cat-pill.building { background: #7f1d1d; color: #fca5a5; }
-.cat-pill.water { background: #0c4a6e; color: #7dd3fc; }
-.osm-tag { font-size: 10px; color: #fff; font-weight: bold; }
+.card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.cat-pill { font-size: 7px; padding: 1px 3px; border-radius: 2px; font-weight: bold; background: #0284c7; color: #fff; }
+.osm-tag { font-size: 10px; color: #fff; font-weight: bold; flex: 1; }
+
+.btn-promote {
+    background: #1e293b; border: 1px solid #475569; color: #38bdf8; font-size: 8px;
+    padding: 2px 6px; border-radius: 2px; cursor: pointer;
+}
+.btn-promote:hover { background: #0284c7; color: #fff; border-color: #38bdf8; }
+
 .card-desc { font-size: 9px; color: #64748b; margin-bottom: 6px; }
 
 .assign-row { display: flex; gap: 4px; margin-bottom: 6px; }

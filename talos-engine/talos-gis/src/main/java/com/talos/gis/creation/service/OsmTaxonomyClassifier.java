@@ -25,12 +25,17 @@ public class OsmTaxonomyClassifier {
     ) {}
 
     public TacticalSpecs classify(Map<String, String> tags) {
-        // 1. Highways & Roads (100% coverage)
+        // 1. Bridges & Crossings (detected before general road)
+        if (tags.containsKey("bridge") && !"no".equals(tags.get("bridge"))) {
+            return classifyBridge(tags);
+        }
+
+        // 2. Highways & Roads
         if (tags.containsKey("highway")) {
             return classifyHighway(tags);
         }
 
-        // 2. Railways
+        // 3. Railways
         if (tags.containsKey("railway")) {
             return new TacticalSpecs(
                     "ROAD", "RAILWAY_TRACK", "railway", tags.get("railway"),
@@ -39,27 +44,42 @@ public class OsmTaxonomyClassifier {
             );
         }
 
-        // 3. Buildings & Structures
+        // 4. Buildings
         if (tags.containsKey("building")) {
             return classifyBuilding(tags);
         }
 
-        // 4. Waterways & Water Bodies
-        if (tags.containsKey("waterway") || "water".equals(tags.get("natural")) || "reservoir".equals(tags.get("landuse"))) {
-            return classifyWater(tags);
+        // 5. Flowing Waterways (Rivers, streams, canals) -> RIVER
+        if (tags.containsKey("waterway")) {
+            return classifyRiver(tags);
         }
 
-        // 5. Vegetation, Forestry & Land Cover
+        // 6. Static Water Bodies (Lakes, reservoirs, ponds) -> OPEN_WATER
+        if ("water".equals(tags.get("natural")) || "reservoir".equals(tags.get("landuse")) || tags.containsKey("water")) {
+            return classifyOpenWater(tags);
+        }
+
+        // 7. Vegetation & Land Cover
         if (tags.containsKey("natural") || tags.containsKey("landuse")) {
             TacticalSpecs land = classifyLanduseAndNatural(tags);
             if (land != null) return land;
         }
 
-        // 6. Default Open Ground
+        // 8. Default Open Soil
         return new TacticalSpecs(
                 "SOIL", "OPEN_TERRAIN", "surface", "ground",
                 0.7f, 0.85f, null, 5.0f,
                 null, null, "Відкрита місцевість / ґрунт"
+        );
+    }
+
+    private TacticalSpecs classifyBridge(Map<String, String> tags) {
+        String bridge = tags.getOrDefault("bridge", "yes");
+        float width = resolveRoadWidth(tags, tags.getOrDefault("highway", "primary"));
+        return new TacticalSpecs(
+                "BRIDGE", "BRIDGE_STRUCTURE", "bridge", bridge,
+                1.0f, 0.9f, null, 25.0f,
+                null, width, "Мостова переправа / шляхопровід"
         );
     }
 
@@ -127,6 +147,25 @@ public class OsmTaxonomyClassifier {
                     height, null, "Житлова / адміністративна споруда"
             );
         };
+    }
+
+    private TacticalSpecs classifyRiver(Map<String, String> tags) {
+        String waterway = tags.getOrDefault("waterway", "stream");
+        boolean isMajor = "river".equals(waterway);
+        return new TacticalSpecs(
+                "RIVER", isMajor ? "RIVER_MAJOR" : "STREAM_CREEK", "waterway", waterway,
+                isMajor ? 0.0f : 0.25f, isMajor ? 0.0f : 0.5f, null, 0.0f,
+                null, isMajor ? 25.0f : 3.5f, isMajor ? "Судноплавна річка" : "Струмок / канава / потік"
+        );
+    }
+
+    private TacticalSpecs classifyOpenWater(Map<String, String> tags) {
+        String val = tags.getOrDefault("water", tags.getOrDefault("natural", "lake"));
+        return new TacticalSpecs(
+                "OPEN_WATER", "LAKE_RESERVOIR", "natural", val,
+                0.0f, 0.0f, null, 0.0f,
+                null, null, "Озеро / ставок / водосховище"
+        );
     }
 
     private TacticalSpecs classifyLanduseAndNatural(Map<String, String> tags) {

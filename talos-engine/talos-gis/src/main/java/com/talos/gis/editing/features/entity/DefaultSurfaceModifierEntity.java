@@ -9,7 +9,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Baseline reference template entity for default terrain surface modifiers.
+ * Global doctrine template entity with visual styling, layer priority rank,
+ * and category-specific tactical properties stored as JSON.
  */
 @Getter
 @Setter
@@ -23,7 +24,7 @@ public class DefaultSurfaceModifierEntity {
     private UUID id;
 
     @Column(nullable = false)
-    private String category;
+    private String category; // 'ROAD', 'BRIDGE', 'RIVER', 'OPEN_WATER', 'VEGETATION', 'BUILDING', 'SOIL'
 
     @Column(name = "osm_key", nullable = false)
     private String osmKey;
@@ -33,17 +34,29 @@ public class DefaultSurfaceModifierEntity {
 
     private String description;
 
+    @Column(name = "movement_priority", nullable = false)
+    private int movementPriority = 50;
+
+    @Column(name = "color_2d")
+    private String color2d = "#f59e0b";
+
+    @Column(name = "texture_3d")
+    private String texture3d = "default";
+
     @Column(name = "speed_modifier_wheeled", nullable = false)
-    private float speedModifierWheeled;
+    private float speedModifierWheeled = 1.0f;
 
     @Column(name = "speed_modifier_tracked", nullable = false)
-    private float speedModifierTracked;
+    private float speedModifierTracked = 1.0f;
 
     @Column(name = "visibility_meters")
     private Float visibilityMeters;
 
     @Column(name = "cover_defense_percent", nullable = false)
-    private float coverDefensePercent;
+    private float coverDefensePercent = 0.0f;
+
+    @Column(name = "properties", columnDefinition = "TEXT")
+    private String properties; // Category-specific JSON payload
 
     @Override
     public boolean equals(Object o) {
