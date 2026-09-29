@@ -1,21 +1,29 @@
 package com.talos.gis.editing.features.service;
 
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
-import com.talos.gis.editing.features.model.FeaturePatchRequest;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.talos.gis.core.entity.MapEntity;
+import com.talos.gis.core.repository.MapRepository;
+import com.talos.gis.core.service.GisStorageService;
+import com.talos.gis.editing.elevation.util.DemRaster;
 import com.talos.gis.editing.features.entity.MapFeatureEntity;
+import com.talos.gis.editing.features.model.FeaturePatchRequest;
 import com.talos.gis.editing.features.repository.MapFeatureRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.File;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Service managing theater vector feature retrieval, fast GeoJSON streaming,
- * and individual tactical feature attribute overrides.
+ * Service managing theater vector feature retrieval, GeoJSON compilation with exact
+ * DEM ground altitude sampling, and individual feature attribute overrides.
  */
 @Service
 public class VectorFeatureService {
@@ -25,22 +33,42 @@ public class VectorFeatureService {
     private static final String DEFAULT_FEATURE_NAME = "Feature";
 
     private final MapFeatureRepository mapFeatureRepository;
+    private final MapRepository mapRepository;
+    private final GisStorageService storageService;
+    private final ObjectMapper objectMapper;
     private final JsonStringEncoder jsonEncoder = JsonStringEncoder.getInstance();
 
-    public VectorFeatureService(MapFeatureRepository mapFeatureRepository) {
+    public VectorFeatureService(MapFeatureRepository mapFeatureRepository,
+                                MapRepository mapRepository,
+                                GisStorageService storageService,
+                                ObjectMapper objectMapper) {
         this.mapFeatureRepository = mapFeatureRepository;
+        this.mapRepository = mapRepository;
+        this.storageService = storageService;
+        this.objectMapper = objectMapper;
     }
 
-    /**
-     * Retrieves vector features for the specified map and compiles a valid GeoJSON FeatureCollection.
-     * Incorporates entity UUID, tactical status, and individual TTX overrides into properties.
-     */
     @Transactional(readOnly = true)
     public String getTheaterVectorsGeoJson(UUID mapId) {
         List<MapFeatureEntity> features = mapFeatureRepository.findByMapId(mapId);
 
         if (features.isEmpty()) {
             return EMPTY_FEATURE_COLLECTION;
+        }
+
+        // Load map DEM raster if available to sample exact ground altitudes for 3D extrusion
+        DemRaster dem = null;
+        MapEntity map = mapRepository.findById(mapId).orElse(null);
+        if (map != null) {
+            Path demPath = storageService.resolvePath(String.format("maps/%s/terrain.tif", mapId));
+            File demFile = demPath.toFile();
+            if (demFile.exists() && demFile.length() > 256) {
+                try {
+                    dem = DemRaster.readFromFile(demFile);
+                } catch (Exception e) {
+                    log.warn("[VECTOR SERVICE] Could not read terrain.tif for ground heights: {}", e.getMessage());
+                }
+            }
         }
 
         StringBuilder sb = new StringBuilder(features.size() * 320 + 64);
@@ -57,6 +85,12 @@ public class VectorFeatureService {
                 sb.append(',');
             }
             first = false;
+
+            // Sample ground elevation under the feature's first vertex
+            float groundAlt = 0.0f;
+            if (dem != null && map != null) {
+                groundAlt = extractGroundAltitude(geometry, dem, map);
+            }
 
             sb.append("{\"type\":\"Feature\",\"geometry\":").append(geometry)
                     .append(",\"properties\":{")
@@ -79,6 +113,7 @@ public class VectorFeatureService {
                     .append("\"coverOverride\":").append(f.getCoverDefenseOverride()).append(',')
                     .append("\"heightMeters\":").append(f.getHeightMeters()).append(',')
                     .append("\"widthMeters\":").append(f.getWidthMeters()).append(',')
+                    .append("\"groundAlt\":").append(groundAlt).append(',')
                     .append("\"customNotes\":\"");
             appendEscaped(sb, f.getCustomNotes() != null ? f.getCustomNotes() : "");
             sb.append("\"}}");
@@ -88,35 +123,45 @@ public class VectorFeatureService {
         return sb.toString();
     }
 
-    /**
-     * Updates an individual feature instance parameters, status, and local TTX overrides.
-     *
-     * @param mapId     theater map UUID
-     * @param featureId target feature entity UUID
-     * @param dto       update parameters
-     * @return true if updated, false if feature not found or does not belong to the map
-     */
+    private float extractGroundAltitude(String geojson, DemRaster dem, MapEntity map) {
+        try {
+            JsonNode geomNode = objectMapper.readTree(geojson);
+            JsonNode coords = geomNode.get("coordinates");
+            if (coords == null || !coords.isArray() || coords.isEmpty()) return 0.0f;
+
+            double lon;
+            double lat;
+
+            // Extract first coordinate pair
+            if ("Polygon".equals(geomNode.path("type").asText())) {
+                JsonNode firstRing = coords.get(0);
+                if (firstRing == null || !firstRing.isArray() || firstRing.isEmpty()) return 0.0f;
+                lon = firstRing.get(0).get(0).asDouble();
+                lat = firstRing.get(0).get(1).asDouble();
+            } else {
+                lon = coords.get(0).get(0).asDouble();
+                lat = coords.get(0).get(1).asDouble();
+            }
+
+            double normX = (lon - map.getMinLon()) / (map.getMaxLon() - map.getMinLon());
+            double normY = (map.getMaxLat() - lat) / (map.getMaxLat() - map.getMinLat());
+
+            return dem.getInterpolatedElevation(normX, normY);
+        } catch (Exception e) {
+            return 0.0f;
+        }
+    }
+
     @Transactional
     public boolean updateFeature(UUID mapId, UUID featureId, FeaturePatchRequest dto) {
         Optional<MapFeatureEntity> featureOpt = mapFeatureRepository.findById(featureId);
-
-        if (featureOpt.isEmpty()) {
-            log.warn("[VECTOR SERVICE] Feature not found: {}", featureId);
-            return false;
-        }
+        if (featureOpt.isEmpty()) return false;
 
         MapFeatureEntity feature = featureOpt.get();
-        if (!feature.getMap().getId().equals(mapId)) {
-            log.warn("[VECTOR SERVICE] Feature {} does not belong to Map {}", featureId, mapId);
-            return false;
-        }
+        if (!feature.getMap().getId().equals(mapId)) return false;
 
-        if (dto.name() != null && !dto.name().isBlank()) {
-            feature.setName(dto.name());
-        }
-        if (dto.status() != null) {
-            feature.setStatus(dto.status());
-        }
+        if (dto.name() != null && !dto.name().isBlank()) feature.setName(dto.name());
+        if (dto.status() != null) feature.setStatus(dto.status());
 
         feature.setSpeedModifierOverrideWheeled(dto.speedModifierOverrideWheeled());
         feature.setSpeedModifierOverrideTracked(dto.speedModifierOverrideTracked());
@@ -124,19 +169,11 @@ public class VectorFeatureService {
         feature.setCoverDefenseOverride(dto.coverDefenseOverride());
         feature.setCustomNotes(dto.customNotes());
 
-        if (dto.heightMeters() != null) {
-            feature.setHeightMeters(dto.heightMeters());
-        }
-        if (dto.widthMeters() != null) {
-            feature.setWidthMeters(dto.widthMeters());
-        }
+        if (dto.heightMeters() != null) feature.setHeightMeters(dto.heightMeters());
+        if (dto.widthMeters() != null) feature.setWidthMeters(dto.widthMeters());
 
         feature.setCustomModified(true);
         mapFeatureRepository.save(feature);
-
-        log.info("[VECTOR SERVICE] Feature {} successfully updated (Status: {}) for Map {}",
-                featureId, feature.getStatus(), mapId);
-
         return true;
     }
 

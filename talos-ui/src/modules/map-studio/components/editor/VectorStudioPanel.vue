@@ -8,6 +8,52 @@
         </div>
 
         <div class="panel-body">
+            <!-- Underlay Control Section (Tracing / Sandy background) -->
+            <div class="underlay-section">
+                <div class="underlay-title-row">
+                    <span class="control-label">🗺️ ПІДКЛАДКА ДЛЯ ОБВЕДЕННЯ:</span>
+                    <select
+                        :value="currentLayerType"
+                        class="layer-mini-select"
+                        @change="$emit('select-layer', ($event.target as HTMLSelectElement).value)"
+                    >
+                        <option v-for="l in layers" :key="l.id" :value="l.layerType">
+                            {{ l.layerType === 'SATELLITE' ? 'Google HD' : l.layerType }}
+                        </option>
+                    </select>
+                </div>
+
+                <div class="input-slider-box">
+                    <div class="box-head">
+                        <label>Прозорість (0% = пісочний фон):</label>
+                        <div class="num-wrap">
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="5"
+                                :value="Math.round(basemapOpacity * 100)"
+                                class="direct-input"
+                                @input="$emit('update:opacity', Number(($event.target as HTMLInputElement).value) / 100)"
+                            />
+                            <span class="unit">%</span>
+                        </div>
+                    </div>
+                    <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        :value="basemapOpacity"
+                        class="range-slider"
+                        @input="$emit('update:opacity', Number(($event.target as HTMLInputElement).value))"
+                    />
+                    <span class="hint-text">
+                        При 0% — однотонний пісочний планшет. Збільште до 30-50% для обведення по фото.
+                    </span>
+                </div>
+            </div>
+
             <!-- Category Filter Pills -->
             <div class="filter-pills-row">
                 <button
@@ -35,7 +81,6 @@
                         <span class="cat-pill" :class="mod.category.toLowerCase()">{{ mod.category }}</span>
                         <code class="osm-tag">{{ mod.osmKey }}={{ mod.osmValue }}</code>
 
-                        <!-- Promote to Global Catalog Button -->
                         <button
                             type="button"
                             class="btn-promote"
@@ -93,12 +138,15 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue';
-import type { TacticalModifierData, SurfaceTemplateResponse } from '../../types';
+import type { TacticalModifierData, SurfaceTemplateResponse, MapLayerDto } from '../../types';
 
 const props = defineProps<{
     modifiers: TacticalModifierData[];
     availableTemplates: SurfaceTemplateResponse[];
     activeHighlightType: string | null;
+    layers: MapLayerDto[];
+    currentLayerType: string;
+    basemapOpacity: number;
 }>();
 
 defineEmits<{
@@ -106,6 +154,8 @@ defineEmits<{
     (e: 'apply-template', mod: TacticalModifierData, templateId: string): void;
     (e: 'promote-to-template', mod: TacticalModifierData): void;
     (e: 'sync-all'): void;
+    (e: 'select-layer', type: string): void;
+    (e: 'update:opacity', val: number): void;
 }>();
 
 const selectedCategory = ref<string>('ALL');
@@ -132,6 +182,27 @@ const filteredModifiers = computed(() => {
 
 .panel-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; font-family: monospace; }
 
+/* Underlay section */
+.underlay-section {
+    background: rgba(0, 0, 0, 0.25); border: 1px solid #334155; padding: 8px; border-radius: 3px;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.underlay-title-row { display: flex; justify-content: space-between; align-items: center; }
+.control-label { font-size: 9px; color: #94a3b8; font-weight: bold; }
+.layer-mini-select {
+    background: #0b1120; border: 1px solid #334155; color: #38bdf8; font-size: 9px; padding: 3px 6px; border-radius: 3px;
+}
+.input-slider-box { display: flex; flex-direction: column; gap: 4px; }
+.box-head { display: flex; justify-content: space-between; align-items: center; font-size: 9px; color: #94a3b8; }
+.num-wrap { display: flex; align-items: center; gap: 4px; }
+.direct-input {
+    width: 42px; background: #0b1120; border: 1px solid #00a8ff; color: #00e676;
+    font-weight: bold; padding: 2px 4px; font-size: 10px; font-family: monospace; border-radius: 2px; text-align: right;
+}
+.unit { color: #64748b; font-size: 9px; }
+.range-slider { width: 100%; cursor: pointer; margin-top: 2px; }
+.hint-text { font-size: 8px; color: #64748b; line-height: 1.3; }
+
 .filter-pills-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .pill-btn {
     background: #1e293b; border: 1px solid #334155; color: #94a3b8;
@@ -139,7 +210,7 @@ const filteredModifiers = computed(() => {
 }
 .pill-btn.active { background: #0284c7; border-color: #38bdf8; color: #fff; }
 
-.modifiers-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 220px); overflow-y: auto; }
+.modifiers-list { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 280px); overflow-y: auto; }
 .mod-item-card {
     background: rgba(0, 0, 0, 0.25); border: 1px solid #334155; border-radius: 3px; padding: 8px; cursor: pointer;
 }

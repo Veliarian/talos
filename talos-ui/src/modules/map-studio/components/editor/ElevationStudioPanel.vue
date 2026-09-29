@@ -5,7 +5,7 @@
         </div>
 
         <div class="panel-body">
-            <!-- Undo / Redo Row -->
+            <!-- Undo / Redo Bar -->
             <div class="undo-redo-bar">
                 <button
                     type="button"
@@ -34,7 +34,7 @@
                     :class="{ active: toolMode === 'NAVIGATE' }"
                     @click="$emit('update:toolMode', 'NAVIGATE')"
                 >
-                    ✋ Огляд (Камера)
+                    ✋ Огляд
                 </button>
                 <button
                     type="button"
@@ -84,7 +84,7 @@
                     </button>
                 </div>
 
-                <!-- Radius with direct numeric input -->
+                <!-- Radius with direct input -->
                 <div class="input-slider-box">
                     <div class="box-head">
                         <label>Радіус дії:</label>
@@ -143,7 +143,6 @@
                     </button>
                 </div>
 
-                <!-- Linear drawing instruction banner with Cancel button -->
                 <div class="drawing-instruction" :class="{ awaiting: isDrawingLine }">
                     <span v-if="!isDrawingLine">📍 Клікніть точку А на карті</span>
                     <div v-else class="drawing-active-row">
@@ -152,7 +151,7 @@
                     </div>
                 </div>
 
-                <!-- Line Width with direct numeric input -->
+                <!-- Width with direct input -->
                 <div class="input-slider-box">
                     <div class="box-head">
                         <label>Ширина лінії:</label>
@@ -181,7 +180,7 @@
                 </div>
             </div>
 
-            <!-- Height Delta with direct numeric input (common for both) -->
+            <!-- Height Delta with direct input -->
             <div v-if="toolMode !== 'NAVIGATE'" class="input-slider-box">
                 <div class="box-head">
                     <label>Глибина / Висота (&Delta;h):</label>
@@ -209,7 +208,52 @@
                 />
             </div>
 
-            <!-- Processing loader -->
+            <!-- Integrated Basemap Underlay Section for Orienting / Spotting Ponds -->
+            <div class="underlay-section">
+                <div class="underlay-title-row">
+                    <span class="control-label">🗺️ ПІДКЛАДКА ДЛЯ ОРІЄНТИРУ:</span>
+                    <select
+                        :value="currentLayerType"
+                        class="layer-mini-select"
+                        @change="$emit('select-layer', ($event.target as HTMLSelectElement).value)"
+                    >
+                        <option v-for="l in layers" :key="l.id" :value="l.layerType">
+                            {{ l.layerType === 'SATELLITE' ? 'Google HD' : l.layerType }}
+                        </option>
+                    </select>
+                </div>
+
+                <div class="input-slider-box">
+                    <div class="box-head">
+                        <label>Прозорість фото (0% = чистий рельєф):</label>
+                        <div class="num-wrap">
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="5"
+                                :value="Math.round(basemapOpacity * 100)"
+                                class="direct-input"
+                                @input="$emit('update:opacity', Number(($event.target as HTMLInputElement).value) / 100)"
+                            />
+                            <span class="unit">%</span>
+                        </div>
+                    </div>
+                    <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        :value="basemapOpacity"
+                        class="range-slider"
+                        @input="$emit('update:opacity', Number(($event.target as HTMLInputElement).value))"
+                    />
+                    <span class="hint-text">
+                        Підніміть до 30-50%, щоб побачити реальний ставок чи яр на фото та викопати там яму.
+                    </span>
+                </div>
+            </div>
+
             <div v-if="isProcessing" class="process-banner">
                 <span class="pulse-dot"></span> Перерахунок DEM растра...
             </div>
@@ -218,7 +262,7 @@
 </template>
 
 <script setup lang="ts">
-import type { SculptOperation, LinearSculptOperation, TerrainHistoryStatus } from '../../types';
+import type { SculptOperation, LinearSculptOperation, TerrainHistoryStatus, MapLayerDto } from '../../types';
 
 defineProps<{
     toolMode: 'NAVIGATE' | 'RADIAL' | 'LINEAR';
@@ -230,6 +274,9 @@ defineProps<{
     historyStatus: TerrainHistoryStatus;
     isDrawingLine: boolean;
     isProcessing: boolean;
+    layers: MapLayerDto[];
+    currentLayerType: string;
+    basemapOpacity: number;
 }>();
 
 defineEmits<{
@@ -242,6 +289,8 @@ defineEmits<{
     (e: 'undo'): void;
     (e: 'redo'): void;
     (e: 'cancel-line'): void;
+    (e: 'select-layer', type: string): void;
+    (e: 'update:opacity', val: number): void;
 }>();
 </script>
 
@@ -288,11 +337,21 @@ defineEmits<{
 .box-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8; }
 .num-wrap { display: flex; align-items: center; gap: 4px; }
 .direct-input {
-    width: 50px; background: #0b1120; border: 1px solid #00a8ff; color: #00e676;
+    width: 45px; background: #0b1120; border: 1px solid #00a8ff; color: #00e676;
     font-weight: bold; padding: 2px 4px; font-size: 11px; font-family: monospace; border-radius: 2px; text-align: right;
 }
 .unit { color: #64748b; font-size: 10px; }
 .range-slider { width: 100%; cursor: pointer; }
+
+/* Underlay section */
+.underlay-section {
+    border-top: 1px solid #334155; padding-top: 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px;
+}
+.underlay-title-row { display: flex; justify-content: space-between; align-items: center; }
+.layer-mini-select {
+    background: #0b1120; border: 1px solid #334155; color: #38bdf8; font-size: 9px; padding: 3px 6px; border-radius: 3px;
+}
+.hint-text { font-size: 8px; color: #64748b; line-height: 1.3; }
 
 .process-banner {
     background: rgba(2, 132, 199, 0.2); border: 1px solid #0284c7; padding: 6px;

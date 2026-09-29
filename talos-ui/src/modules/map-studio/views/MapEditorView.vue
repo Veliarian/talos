@@ -1,6 +1,6 @@
 <template>
     <div class="editor-workspace">
-        <!-- 1. Top Header with Workspace Tabs -->
+        <!-- 1. Top Header with 2 Workspace Tabs -->
         <EditorHeader
             :map-name="map.name"
             :size-km="map.sizeKm"
@@ -10,7 +10,7 @@
         />
 
         <div class="editor-body">
-            <!-- 2. Main Viewport -->
+            <!-- 2. Main Viewport Area -->
             <div class="map-viewport">
                 <div ref="canvasContainer" class="cesium-map-canvas"></div>
 
@@ -39,9 +39,14 @@
                     :history-status="historyStatus"
                     :is-drawing-line="lineStartCartesian !== null"
                     :is-processing="isProcessing"
+                    :layers="map.layers"
+                    :current-layer-type="currentLayerType"
+                    :basemap-opacity="elevationOpacity"
                     @undo="handleUndo"
                     @redo="handleRedo"
                     @cancel-line="lineStartCartesian = null"
+                    @select-layer="onSelectBasemapLayer"
+                    @update:opacity="onUpdateElevationOpacity"
                 />
 
                 <!-- Panel 2: Tactical Objects -->
@@ -50,18 +55,15 @@
                     :modifiers="modifiers"
                     :available-templates="availableTemplates"
                     :active-highlight-type="activeHighlightType"
+                    :layers="map.layers"
+                    :current-layer-type="currentLayerType"
+                    :basemap-opacity="objectsOpacity"
                     @highlight="highlightObjectsOnMap"
                     @apply-template="applyTemplateToCategory"
                     @promote-to-template="handlePromoteToTemplate"
                     @sync-all="handleSyncAllTemplates"
-                />
-
-                <!-- Panel 3: Basemap Textures -->
-                <TextureStudioPanel
-                    v-else-if="activeTab === 'TEXTURES'"
-                    :layers="map.layers"
-                    :current-layer-type="currentLayerType"
                     @select-layer="onSelectBasemapLayer"
+                    @update:opacity="onUpdateObjectsOpacity"
                 />
             </aside>
         </div>
@@ -72,9 +74,11 @@
             :cursor-mgrs="cursorMgrsDisplay"
             :cursor-elevation="cursorElevationDisplay"
             :is-3-d-mode="is3DMode"
-            :tool-mode="activeTab === 'ELEVATION' ? elevationToolMode : (activeTab === 'OBJECTS' ? 'INSPECT' : 'NAVIGATE')"
+            :is-ground-mode="isGroundMode"
+            :tool-mode="activeTab === 'ELEVATION' ? elevationToolMode : 'INSPECT'"
             :is-drawing-line="lineStartCartesian !== null"
             @toggle-perspective="fitCamera(!is3DMode)"
+            @toggle-ground-mode="toggleGroundMode"
         />
     </div>
 </template>
@@ -87,10 +91,7 @@ import {
     Cartographic,
     Math as CesiumMath,
     Cartesian2,
-    defined,
-    Color,
-    ColorMaterialProperty,
-    ConstantProperty
+    defined
 } from 'cesium';
 import { mapApi } from '../mapApi';
 import { coordConverter } from '@/shared/utils/coordConverter';
@@ -100,7 +101,7 @@ import type {
     LinearSculptOperation,
     TerrainHistoryStatus,
     TacticalModifierData,
-    DefaultModifierDto,
+    SurfaceTemplateResponse,
     FeatureStatus
 } from '../types';
 import { useEditorMap } from '../composables/useEditorMap';
@@ -108,7 +109,6 @@ import { useEditorMap } from '../composables/useEditorMap';
 import EditorHeader, { type EditorWorkspaceTab } from '../components/editor/EditorHeader.vue';
 import EditorStatusBar from '../components/editor/EditorStatusBar.vue';
 import ElevationStudioPanel from '../components/editor/ElevationStudioPanel.vue';
-import TextureStudioPanel from '../components/editor/TextureStudioPanel.vue';
 import VectorStudioPanel from '../components/editor/VectorStudioPanel.vue';
 import FeatureInspectorDrawer from '../components/editor/FeatureInspectorDrawer.vue';
 
@@ -129,7 +129,7 @@ const isProcessing = ref(false);
 
 const historyStatus = ref<TerrainHistoryStatus>({ canUndo: false, canRedo: false });
 const modifiers = ref<TacticalModifierData[]>([]);
-const availableTemplates = ref<DefaultModifierDto[]>([]);
+const availableTemplates = ref<SurfaceTemplateResponse[]>([]);
 const inspectedFeature = ref<any>(null);
 const activeHighlightType = ref<string | null>(null);
 
@@ -141,14 +141,21 @@ const cursorElevationDisplay = ref(120);
 const {
     viewer,
     is3DMode,
+    isGroundMode,
+    toggleGroundMode,
+    centerAltitudeDisplay,
     currentLayerType,
-    layerStack,
+    elevationOpacity,
+    objectsOpacity,
     lineStartCartesian,
     currentMouseCartesian,
+    cachedGeoJson,
     initViewer,
     fitCamera,
     mountBaseLayer,
-    applyLayerStack,
+    setElevationOpacity,
+    setObjectsOpacity,
+    setViewMode,
     loadVectors,
     reapplyAllStyling,
     invalidateTerrainCache,
@@ -160,25 +167,20 @@ let clickHandler: ScreenSpaceEventHandler | null = null;
 
 const onSelectWorkspaceTab = (tab: EditorWorkspaceTab) => {
     activeTab.value = tab;
-    if (tab === 'ELEVATION') {
-        layerStack.elevation = true;
-        layerStack.texture = true;
-        layerStack.objects = false;
-    } else if (tab === 'OBJECTS') {
-        layerStack.elevation = false;
-        layerStack.texture = true;
-        layerStack.objects = true;
-    } else if (tab === 'TEXTURES') {
-        layerStack.elevation = false;
-        layerStack.texture = true;
-        layerStack.objects = false;
-    }
-    applyLayerStack();
+    setViewMode(tab, modifiers.value);
 };
 
 const onSelectBasemapLayer = (type: string) => {
     currentLayerType.value = type;
     mountBaseLayer(type);
+};
+
+const onUpdateElevationOpacity = (val: number) => {
+    setElevationOpacity(val);
+};
+
+const onUpdateObjectsOpacity = (val: number) => {
+    setObjectsOpacity(val);
 };
 
 const refreshHistory = async () => {
@@ -212,7 +214,6 @@ onMounted(async () => {
     initViewer(canvasContainer.value);
 
     mountBaseLayer(currentLayerType.value);
-    onSelectWorkspaceTab('OBJECTS');
 
     try {
         modifiers.value = await mapApi.getModifiers(props.map.id);
@@ -221,31 +222,20 @@ onMounted(async () => {
         await loadVectors(vectors, modifiers.value);
     } catch (err) {
         console.warn('Initial data load error:', err);
-        console.warn('Initial data load error:', err);
     }
 
+    onSelectWorkspaceTab('ELEVATION');
     setupInteractions();
     await refreshHistory();
 });
 
-const handlePromoteToTemplate = async (mod: TacticalModifierData) => {
-    try {
-        await mapApi.promoteModifierToTemplate(props.map.id, mod.id);
-        availableTemplates.value = await mapApi.getTemplates();
-        alert(`Тип "${mod.osmKey}=${mod.osmValue}" успішно збережено в Головний Довідник!`);
-    } catch (err) {
-        alert('Помилка збереження в довідник: ' + err);
-    }
-};
-
-const handleSyncAllTemplates = async () => {
-    try {
-        const res = await mapApi.syncMapTemplates(props.map.id);
-        modifiers.value = await mapApi.getModifiers(props.map.id);
-        reapplyAllStyling(modifiers.value);
-        alert(`Синхронізовано ${res.syncedCount} типів об'єктів з Головним Довідником!`);
-    } catch (err) {
-        alert('Помилка синхронізації: ' + err);
+const highlightObjectsOnMap = (mod: TacticalModifierData) => {
+    if (activeHighlightType.value === mod.osmValue) {
+        activeHighlightType.value = null;
+        highlightCategoryObjects(null);
+    } else {
+        activeHighlightType.value = mod.osmValue;
+        highlightCategoryObjects(mod.osmValue);
     }
 };
 
@@ -275,27 +265,32 @@ const setupInteractions = () => {
         }
     }, ScreenSpaceEventType.MOUSE_MOVE);
 
-    // Left Click: Sculpting or Feature Inspecting
+    // Left Click: High-speed Batched Picking or Sculpting Actions
     clickHandler.setInputAction(async (event: { position: Cartesian2 }) => {
         const currentViewer = viewer.value;
         if (!currentViewer) return;
 
-        // 1. Objects Workspace: Feature Inspecting
+        // 1. Objects Workspace: Fast Raycast Picking on Batched Primitives
         if (activeTab.value === 'OBJECTS') {
             const picked = currentViewer.scene.pick(event.position);
-            if (defined(picked) && picked.id && picked.id.properties) {
-                const p = picked.id.properties;
-                inspectedFeature.value = {
-                    id: p.id ? String(p.id.getValue()) : '',
-                    name: p.name ? p.name.getValue() : 'Об’єкт',
-                    category: p.category ? p.category.getValue() : 'UNKNOWN',
-                    status: (p.status ? p.status.getValue() : 'OPERATIONAL') as FeatureStatus,
-                    speedOverrideWheeled: p.speedOverrideWheeled ? Number(p.speedOverrideWheeled.getValue()) : null,
-                    speedOverrideTracked: p.speedOverrideTracked ? Number(p.speedOverrideTracked.getValue()) : null,
-                    visibilityOverride: p.visibilityOverride ? Number(p.visibilityOverride.getValue()) : null,
-                    coverOverride: p.coverOverride ? Number(p.coverOverride.getValue()) : null,
-                    cesiumEntity: picked.id
-                };
+            if (defined(picked) && picked.id) {
+                const featureId = typeof picked.id === 'string' ? picked.id : picked.id.id;
+                const geoJson = cachedGeoJson();
+                const matchedFeature = geoJson?.features?.find((f: any) => f.properties?.id === featureId);
+
+                if (matchedFeature) {
+                    const p = matchedFeature.properties;
+                    inspectedFeature.value = {
+                        id: p.id,
+                        name: p.name || 'Об’єкт',
+                        category: p.category || 'UNKNOWN',
+                        status: (p.status || 'OPERATIONAL') as FeatureStatus,
+                        speedOverrideWheeled: p.speedOverrideWheeled ?? null,
+                        speedOverrideTracked: p.speedOverrideTracked ?? null,
+                        visibilityOverride: p.visibilityOverride ?? null,
+                        coverOverride: p.coverOverride ?? null
+                    };
+                }
             }
             return;
         }
@@ -357,14 +352,24 @@ const setupInteractions = () => {
     }, ScreenSpaceEventType.LEFT_CLICK);
 };
 
-const highlightObjectsOnMap = (mod: TacticalModifierData) => {
-    // If clicking the same item, toggle off highlight
-    if (activeHighlightType.value === mod.osmValue) {
-        activeHighlightType.value = null;
-        highlightCategoryObjects(null);
-    } else {
-        activeHighlightType.value = mod.osmValue;
-        highlightCategoryObjects(mod.osmValue);
+const handlePromoteToTemplate = async (mod: TacticalModifierData) => {
+    try {
+        await mapApi.promoteModifierToTemplate(props.map.id, mod.id);
+        availableTemplates.value = await mapApi.getTemplates();
+        alert(`Тип "${mod.osmKey}=${mod.osmValue}" успішно збережено в Головний Довідник!`);
+    } catch (err) {
+        alert('Помилка збереження в довідник: ' + err);
+    }
+};
+
+const handleSyncAllTemplates = async () => {
+    try {
+        const res = await mapApi.syncMapTemplates(props.map.id);
+        modifiers.value = await mapApi.getModifiers(props.map.id);
+        reapplyAllStyling(modifiers.value);
+        alert(`Синхронізовано ${res.syncedCount} типів об'єктів з Головним Довідником!`);
+    } catch (err) {
+        alert('Помилка синхронізації: ' + err);
     }
 };
 
@@ -415,7 +420,7 @@ onUnmounted(() => {
 .cesium-map-canvas { width: 100%; height: 100%; }
 
 .inspector-sidebar {
-    width: 360px; background: rgba(15, 23, 42, 0.98); border-left: 1px solid rgba(0, 168, 255, 0.25);
+    width: 380px; background: rgba(15, 23, 42, 0.98); border-left: 1px solid rgba(0, 168, 255, 0.25);
     display: flex; flex-direction: column; padding: 12px; overflow-y: auto; z-index: 100;
 }
 </style>

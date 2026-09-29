@@ -8,7 +8,7 @@
             </div>
         </div>
 
-        <!-- MAIN WORKSPACE SELECTOR TABS -->
+        <!-- TWO MAIN WORKSPACE SELECTOR TABS -->
         <div class="workspace-tabs">
             <button
                 type="button"
@@ -26,14 +26,6 @@
             >
                 🏘️ ТАКТИЧНІ ОБ'ЄКТИ
             </button>
-            <button
-                type="button"
-                class="ws-tab"
-                :class="{ active: activeTab === 'TEXTURES' }"
-                @click="$emit('select-tab', 'TEXTURES')"
-            >
-                🗺️ ПІДКЛАДКИ КАРТИ
-            </button>
         </div>
 
         <div class="header-right">
@@ -43,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-export type EditorWorkspaceTab = 'ELEVATION' | 'OBJECTS' | 'TEXTURES';
+export type EditorWorkspaceTab = 'ELEVATION' | 'OBJECTS';
 
 defineProps<{
     mapName: string;
@@ -89,7 +81,7 @@ defineEmits<{
     background: transparent;
     border: 1px solid transparent;
     color: #94a3b8;
-    padding: 6px 14px;
+    padding: 6px 16px;
     font-size: 11px;
     font-family: monospace;
     font-weight: bold;
