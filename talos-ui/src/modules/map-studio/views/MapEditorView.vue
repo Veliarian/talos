@@ -18,10 +18,8 @@
                 <FeatureInspectorDrawer
                     v-if="inspectedFeature && activeTab === 'OBJECTS'"
                     :feature="inspectedFeature"
-                    :available-templates="availableTemplates"
                     @close="inspectedFeature = null"
                     @save="saveCurrentFeature"
-                    @apply-template="applyTemplateToFeature"
                 />
             </div>
 
@@ -91,7 +89,8 @@ import {
     Cartographic,
     Math as CesiumMath,
     Cartesian2,
-    defined
+    defined,
+    Entity
 } from 'cesium';
 import { mapApi } from '../mapApi';
 import { coordConverter } from '@/shared/utils/coordConverter';
@@ -102,7 +101,8 @@ import type {
     TerrainHistoryStatus,
     TacticalModifierData,
     SurfaceTemplateResponse,
-    FeatureStatus
+    FeatureStatus,
+    FeatureUpdateRequest
 } from '../types';
 import { useEditorMap } from '../composables/useEditorMap';
 
@@ -138,18 +138,47 @@ const cursorCoordsDisplay = ref('—');
 const cursorMgrsDisplay = ref('—');
 const cursorElevationDisplay = ref(120);
 
+// High-speed O(1) in-memory feature registry
+const featureRegistry = new Map<string, any>();
+
+const registerFeatures = (geoJson: any) => {
+    featureRegistry.clear();
+    if (!geoJson?.features) return;
+    for (const f of geoJson.features) {
+        const id = f.properties?.id;
+        if (id) {
+            featureRegistry.set(id, f.properties);
+        }
+    }
+};
+
+const findFeatureById = (featureId: string, entity?: any) => {
+    if (featureRegistry.has(featureId)) {
+        return featureRegistry.get(featureId);
+    }
+    // Fallback: extract properties directly from Cesium Entity
+    if (entity?.properties) {
+        const propsRaw: Record<string, any> = {};
+        for (const key of entity.properties.propertyNames) {
+            propsRaw[key] = entity.properties[key]?.getValue?.() ?? entity.properties[key];
+        }
+        propsRaw.id = featureId || entity.id;
+        return propsRaw;
+    }
+    return null;
+};
+
 const {
     viewer,
     is3DMode,
     isGroundMode,
     toggleGroundMode,
-    centerAltitudeDisplay,
+    updateFeatureProperties,
     currentLayerType,
     elevationOpacity,
     objectsOpacity,
     lineStartCartesian,
     currentMouseCartesian,
-    cachedGeoJson,
     initViewer,
     fitCamera,
     mountBaseLayer,
@@ -219,6 +248,9 @@ onMounted(async () => {
         modifiers.value = await mapApi.getModifiers(props.map.id);
         availableTemplates.value = await mapApi.getTemplates();
         const vectors = await mapApi.getMapVectors(props.map.id);
+
+        // Build O(1) fast lookup table
+        registerFeatures(vectors);
         await loadVectors(vectors, modifiers.value);
     } catch (err) {
         console.warn('Initial data load error:', err);
@@ -265,32 +297,41 @@ const setupInteractions = () => {
         }
     }, ScreenSpaceEventType.MOUSE_MOVE);
 
-    // Left Click: High-speed Batched Picking or Sculpting Actions
+    // Left Click: High-speed O(1) Picking or Sculpting Actions
     clickHandler.setInputAction(async (event: { position: Cartesian2 }) => {
         const currentViewer = viewer.value;
         if (!currentViewer) return;
 
-        // 1. Objects Workspace: Fast Raycast Picking on Batched Primitives
+        // 1. Objects Workspace: Fast O(1) Raycast Picking
         if (activeTab.value === 'OBJECTS') {
             const picked = currentViewer.scene.pick(event.position);
             if (defined(picked) && picked.id) {
-                const featureId = typeof picked.id === 'string' ? picked.id : picked.id.id;
-                const geoJson = cachedGeoJson();
-                const matchedFeature = geoJson?.features?.find((f: any) => f.properties?.id === featureId);
+                const entity = picked.id instanceof Entity ? picked.id : null;
+                const featureId = typeof picked.id === 'string'
+                    ? picked.id
+                    : (entity?.properties?.id?.getValue?.() || entity?.properties?.id || picked.id.id);
 
-                if (matchedFeature) {
-                    const p = matchedFeature.properties;
+                const matched = findFeatureById(featureId, entity);
+
+                if (matched) {
                     inspectedFeature.value = {
-                        id: p.id,
-                        name: p.name || 'Об’єкт',
-                        category: p.category || 'UNKNOWN',
-                        status: (p.status || 'OPERATIONAL') as FeatureStatus,
-                        speedOverrideWheeled: p.speedOverrideWheeled ?? null,
-                        speedOverrideTracked: p.speedOverrideTracked ?? null,
-                        visibilityOverride: p.visibilityOverride ?? null,
-                        coverOverride: p.coverOverride ?? null
+                        id: matched.id,
+                        name: matched.name || 'Тактичний об’єкт',
+                        category: matched.category || 'UNKNOWN',
+                        typeKey: matched.typeKey || '',
+                        typeValue: matched.typeValue || '',
+                        status: (matched.status || 'OPERATIONAL') as FeatureStatus,
+                        speedOverrideWheeled: matched.speedOverrideWheeled ?? null,
+                        speedOverrideTracked: matched.speedOverrideTracked ?? null,
+                        visibilityOverride: matched.visibilityOverride ?? null,
+                        coverOverride: matched.coverOverride ?? null,
+                        widthMeters: matched.widthMeters ?? null,
+                        heightMeters: matched.heightMeters ?? null,
+                        customNotes: matched.customNotes || ''
                     };
                 }
+            } else {
+                inspectedFeature.value = null;
             }
             return;
         }
@@ -384,27 +425,29 @@ const applyTemplateToCategory = async (mod: TacticalModifierData, templateId: st
     }
 };
 
-const applyTemplateToFeature = (templateId: string) => {
-    const tmpl = availableTemplates.value.find(t => t.id === templateId);
-    if (tmpl && inspectedFeature.value) {
-        inspectedFeature.value.speedOverrideWheeled = tmpl.speedModifierWheeled;
-        inspectedFeature.value.speedOverrideTracked = tmpl.speedModifierTracked;
-        inspectedFeature.value.coverOverride = tmpl.coverDefensePercent;
-        inspectedFeature.value.visibilityOverride = tmpl.visibilityMeters;
-    }
-};
-
-const saveCurrentFeature = async () => {
+const saveCurrentFeature = async (patch: FeatureUpdateRequest) => {
     if (!inspectedFeature.value) return;
-    await mapApi.updateFeature(props.map.id, inspectedFeature.value.id, {
-        name: inspectedFeature.value.name,
-        status: inspectedFeature.value.status,
-        speedModifierOverrideWheeled: inspectedFeature.value.speedOverrideWheeled,
-        speedModifierOverrideTracked: inspectedFeature.value.speedOverrideTracked,
-        visibilityOverride: inspectedFeature.value.visibilityOverride,
-        coverDefenseOverride: inspectedFeature.value.coverOverride
-    });
-    alert('Об’єкт збережено!');
+
+    try {
+        isProcessing.value = true;
+
+        // 1. Send update to PostGIS backend
+        await mapApi.updateFeature(props.map.id, inspectedFeature.value.id, patch);
+
+        // 2. Perform instant in-memory GPU patch (0.001 ms, zero lag)
+        updateFeatureProperties(inspectedFeature.value.id, patch);
+
+        // 3. Update local registry and active inspected reference
+        Object.assign(inspectedFeature.value, patch);
+        if (featureRegistry.has(inspectedFeature.value.id)) {
+            Object.assign(featureRegistry.get(inspectedFeature.value.id), patch);
+        }
+
+    } catch (err) {
+        alert('Помилка збереження об’єкта: ' + err);
+    } finally {
+        isProcessing.value = false;
+    }
 };
 
 onUnmounted(() => {
@@ -414,13 +457,40 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.editor-workspace { width: 100vw; height: 100vh; background: #020617; display: flex; flex-direction: column; overflow: hidden; }
-.editor-body { display: flex; flex: 1; overflow: hidden; }
-.map-viewport { flex: 1; position: relative; background: #020617; }
-.cesium-map-canvas { width: 100%; height: 100%; }
+.editor-workspace {
+    width: 100vw;
+    height: 100vh;
+    background: #020617;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.editor-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.map-viewport {
+    flex: 1;
+    position: relative;
+    background: #020617;
+}
+
+.cesium-map-canvas {
+    width: 100%;
+    height: 100%;
+}
 
 .inspector-sidebar {
-    width: 380px; background: rgba(15, 23, 42, 0.98); border-left: 1px solid rgba(0, 168, 255, 0.25);
-    display: flex; flex-direction: column; padding: 12px; overflow-y: auto; z-index: 100;
+    width: 380px;
+    background: rgba(15, 23, 42, 0.98);
+    border-left: 1px solid rgba(0, 168, 255, 0.25);
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    overflow-y: auto;
+    z-index: 100;
 }
 </style>

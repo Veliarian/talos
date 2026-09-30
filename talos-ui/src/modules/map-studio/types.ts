@@ -1,9 +1,13 @@
+// types.ts
+// Domain Types and Contracts for TALOS Tactical GIS Engine
+
 export type LayerType = 'SATELLITE' | 'TOPOGRAPHIC' | 'TACTICAL';
 export type MapStatus = 'CREATED' | 'DOWNLOADING' | 'READY' | 'FAILED';
 export type SculptOperation = 'DIG' | 'RAISE' | 'FLATTEN';
 export type FeatureStatus = 'OPERATIONAL' | 'DESTROYED' | 'MINED' | 'CHECKPOINT';
 export type SculptMode = 'RADIAL' | 'LINEAR';
 export type LinearSculptOperation = 'TRENCH_DIG' | 'AT_DITCH' | 'BERM_RAISE';
+
 export type ModifierCategory =
     | 'ROAD'
     | 'BRIDGE'
@@ -128,7 +132,7 @@ export interface TacticalModifierData {
     propertiesJson?: string | null;
 }
 
-export interface MapLayerDto {
+export interface MapLayerData {
     id: string;
     layerType: LayerType;
     minZoom: number;
@@ -137,7 +141,7 @@ export interface MapLayerDto {
     status: MapStatus;
 }
 
-export interface MapDetailDto {
+export interface MapDetailResponse {
     id: string;
     name: string;
     description: string;
@@ -150,7 +154,7 @@ export interface MapDetailDto {
     sizeKm: number;
     status: MapStatus;
     createdAt: string;
-    layers: MapLayerDto[];
+    layers: MapLayerData[];
 }
 
 export interface MapCreationRequest {
@@ -164,25 +168,13 @@ export interface MapCreationRequest {
     maxZoom?: number;
 }
 
-export interface SurfaceModifierDto {
-    id: string;
-    category: ModifierCategory;
-    osmKey: string;
-    osmValue: string;
-    description: string;
-    speedModifierWheeled: number;
-    speedModifierTracked: number;
-    visibilityMeters: number | null;
-    coverDefensePercent: number;
-}
-
-export interface FeatureUpdateRequestDto {
+export interface FeatureUpdateRequest {
     name?: string;
     status: FeatureStatus;
-    speedModifierOverrideWheeled: number | null;
-    speedModifierOverrideTracked: number | null;
-    visibilityOverride: number | null;
-    coverDefenseOverride: number | null;
+    speedModifierOverrideWheeled?: number | null;
+    speedModifierOverrideTracked?: number | null;
+    visibilityOverride?: number | null;
+    coverDefenseOverride?: number | null;
     customNotes?: string;
     heightMeters?: number | null;
     widthMeters?: number | null;
@@ -232,18 +224,6 @@ export interface GeoJsonFeatureCollection {
     }>;
 }
 
-export interface DefaultModifierDto {
-    id: string;
-    category: ModifierCategory;
-    osmKey: string;
-    osmValue: string;
-    description: string;
-    speedModifierWheeled: number;
-    speedModifierTracked: number;
-    visibilityMeters: number | null;
-    coverDefensePercent: number;
-}
-
 export interface LineTerrainSculptRequest {
     startLat: number;
     startLon: number;
@@ -258,3 +238,10 @@ export interface TerrainHistoryStatus {
     canUndo: boolean;
     canRedo: boolean;
 }
+
+// Backward compatibility aliases during transition
+export type MapDetailDto = MapDetailResponse;
+export type MapLayerDto = MapLayerData;
+export type FeatureUpdateRequestDto = FeatureUpdateRequest;
+export type SurfaceModifierDto = TacticalModifierData;
+export type DefaultModifierDto = TacticalModifierData;

@@ -24,6 +24,18 @@
         </div>
 
         <div class="status-right">
+            <!-- WASD First Person Roaming Toggle -->
+            <button
+                v-if="is3DMode"
+                type="button"
+                class="btn-ground-mode"
+                :class="{ active: isGroundMode }"
+                @click="$emit('toggle-ground-mode')"
+            >
+                {{ isGroundMode ? '🪖 НАЗЕМНИЙ РЕЖИМ (WASD: УВІМК)' : '🚶 ОГЛЯД З ПОВЕРХНІ' }}
+            </button>
+
+            <!-- 2D / 3D Perspective Toggle -->
             <button
                 type="button"
                 class="btn-perspective"
@@ -44,15 +56,18 @@ const props = defineProps<{
     cursorMgrs: string;
     cursorElevation: number;
     is3DMode: boolean;
+    isGroundMode: boolean;
     toolMode: string;
     isDrawingLine: boolean;
 }>();
 
 defineEmits<{
     (e: 'toggle-perspective'): void;
+    (e: 'toggle-ground-mode'): void;
 }>();
 
 const activeToolLabel = computed(() => {
+    if (props.isGroundMode) return '🎮 КЕРУВАННЯ: WASD + SHIFT (БІГ), ПРАВА КНОПКА МИШІ (ОГЛЯД)';
     if (props.isDrawingLine) return '📏 ЛІНІЯ: ОБЕРІТЬ ТОЧКУ (Б)';
     if (props.toolMode === 'LINEAR') return '📏 ІНСТРУМЕНТ: ЛІНІЯ (А → Б)';
     if (props.toolMode === 'RADIAL') return '🖌️ ІНСТРУМЕНТ: РАДІАЛЬНИЙ ПЕНЗЕЛЬ';
@@ -61,6 +76,7 @@ const activeToolLabel = computed(() => {
 });
 
 const activeToolClass = computed(() => {
+    if (props.isGroundMode) return 'ground';
     if (props.isDrawingLine) return 'drawing';
     if (props.toolMode === 'LINEAR' || props.toolMode === 'RADIAL') return 'sculpt';
     if (props.toolMode === 'INSPECT') return 'inspect';
@@ -118,4 +134,38 @@ const activeToolClass = computed(() => {
 }
 .btn-perspective:hover { background: #0284c7; color: #fff; }
 .btn-perspective.is3d { background: #0284c7; color: #fff; border-color: #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.4); }
+
+.btn-ground-mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    margin-right: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #cbd5e1;
+    background: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-ground-mode:hover {
+    background: #334155;
+    color: #f8fafc;
+}
+
+.btn-ground-mode.active {
+    background: #16a34a;
+    border-color: #22c55e;
+    color: #ffffff;
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
+}
+
+.active-tool-pill.ground {
+    background: rgba(34, 197, 94, 0.2);
+    border: 1px solid #22c55e;
+    color: #4ade80;
+}
 </style>

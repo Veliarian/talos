@@ -1,14 +1,18 @@
+// useEditorMap.ts
+// Unified facade coordinating terrain, basemaps, vectors, 3D trees, and camera roaming
+
 import { ref } from 'vue';
 import {
     Cartesian3,
     Color,
     CallbackProperty
 } from 'cesium';
-import type { MapDetailDto, TacticalModifierData } from '../types';
+import type { MapDetailDto, TacticalModifierData, FeatureUpdateRequest } from '../types';
 import { useCesiumViewer } from './useCesiumViewer';
 import { useTerrainElevation } from './useTerrainElevation';
 import { useBasemapLayers } from './useBasemapLayers';
 import { useVectorOverlay } from './useVectorOverlay';
+import { useVegetationTrees } from './useVegetationTrees';
 import { useSurfaceCamera } from './useSurfaceCamera';
 
 export function useEditorMap(map: MapDetailDto) {
@@ -21,7 +25,13 @@ export function useEditorMap(map: MapDetailDto) {
     let cachedModifiers: TacticalModifierData[] = [];
 
     // 1. Viewer instance & camera
-    const { viewer, is3DMode, initViewerInstance, fitCamera: fitCameraBase, destroyViewer: destroyViewerBase } = useCesiumViewer(map);
+    const {
+        viewer,
+        is3DMode,
+        initViewerInstance,
+        fitCamera: fitCameraBase,
+        destroyViewer: destroyViewerBase
+    } = useCesiumViewer(map);
 
     // 2. Terrain & elevation (DEM)
     const {
@@ -42,15 +52,26 @@ export function useEditorMap(map: MapDetailDto) {
         updateImageryAppearance
     } = useBasemapLayers(viewer, map);
 
-    // 4. Vector Overlay with true Ground Clamping
+    // 4. Vector Overlay with true Ground Clamping and picking
     const {
+        selectedFeatureId,
         loadVectors: loadVectorsInternal,
         setVectorsVisible,
         highlightCategoryObjects: highlightCategoryInternal,
-        reapplyAllStyling: reapplyAllInternal
+        reapplyAllStyling: reapplyAllInternal,
+        updateEntityProperties: updateEntityInternal,
+        enableFeaturePicking,
+        disableFeaturePicking
     } = useVectorOverlay(viewer);
 
-    // 5. Surface Camera (WASD)
+    // 5. 3D Instanced Vegetation (Single-pass GPU Billboard Batching)
+    const {
+        buildTreeCollection,
+        setTreesVisible,
+        destroyTrees
+    } = useVegetationTrees(viewer);
+
+    // 6. Surface Camera (WASD)
     const { isGroundMode, toggleGroundMode, disableGroundMode } = useSurfaceCamera(viewer);
 
     const initViewer = (container: HTMLDivElement) => {
@@ -82,11 +103,15 @@ export function useEditorMap(map: MapDetailDto) {
         }
 
         is3DMode.value = is3d;
-        fitCameraBase(is3d);
+        fitCameraBase(is3d); // Плавний flyTo за 0.8с
 
-        // Update building extrusion for 2D flat or 3D volumetric mode
+        // Керуємо ТІЛЬКИ локальним тактичним куполом дерев (без чіпання 40 000 векторів!)
         if (activeViewMode.value === 'OBJECTS') {
-            reapplyAllInternal(cachedModifiers, is3d);
+            if (is3d && cachedGeoJson) {
+                buildTreeCollection(cachedGeoJson, true);
+            } else {
+                destroyTrees();
+            }
         }
     };
 
@@ -98,6 +123,7 @@ export function useEditorMap(map: MapDetailDto) {
 
         if (mode === 'ELEVATION') {
             setVectorsVisible(false);
+            destroyTrees();
             applyElevationHeatmap(1.0 - elevationOpacity.value);
 
             v.scene.globe.show = false;
@@ -110,14 +136,19 @@ export function useEditorMap(map: MapDetailDto) {
 
         if (mode === 'OBJECTS') {
             clearElevationHeatmap();
-            v.scene.globe.baseColor = Color.fromCssColorString('#d4c5a9'); // Pure Tactical Sand
+            v.scene.globe.baseColor = Color.fromCssColorString('#d4c5a9');
 
             v.scene.globe.show = false;
             v.scene.globe.show = true;
 
             setVectorsVisible(true);
             updateImageryAppearance('OBJECTS');
-            reapplyAllInternal(modifiersList, is3DMode.value);
+
+            // Дерева активуються тільки в 3D режимі об'єктів
+            if (is3DMode.value && cachedGeoJson) {
+                buildTreeCollection(cachedGeoJson, true);
+            }
+
             v.scene.requestRender();
         }
     };
@@ -138,7 +169,11 @@ export function useEditorMap(map: MapDetailDto) {
     const loadVectors = async (geoJson: any, modifiersList: TacticalModifierData[]) => {
         cachedGeoJson = geoJson;
         cachedModifiers = modifiersList;
-        await loadVectorsInternal(geoJson, modifiersList, is3DMode.value, activeViewMode.value === 'OBJECTS');
+        await loadVectorsInternal(geoJson, modifiersList, activeViewMode.value === 'OBJECTS');
+
+        if (is3DMode.value && activeViewMode.value === 'OBJECTS') {
+            buildTreeCollection(geoJson, true);
+        }
     };
 
     const reapplyAllStyling = (modifiersList: TacticalModifierData[]) => {
@@ -150,8 +185,13 @@ export function useEditorMap(map: MapDetailDto) {
         highlightCategoryInternal(osmValue, is3DMode.value);
     };
 
+    const updateFeatureProperties = (featureId: string, patch: FeatureUpdateRequest) => {
+        updateEntityInternal(featureId, patch);
+    };
+
     const destroyViewer = () => {
         disableGroundMode();
+        destroyTrees();
         destroyViewerBase();
     };
 
@@ -159,6 +199,7 @@ export function useEditorMap(map: MapDetailDto) {
         viewer,
         is3DMode,
         isGroundMode,
+        selectedFeatureId,
         toggleGroundMode,
         centerAltitudeDisplay,
         currentLayerType,
@@ -176,6 +217,9 @@ export function useEditorMap(map: MapDetailDto) {
         loadVectors,
         reapplyAllStyling,
         highlightCategoryObjects,
+        updateFeatureProperties,
+        enableFeaturePicking,
+        disableFeaturePicking,
         invalidateTerrainCache,
         destroyViewer
     };

@@ -1,3 +1,6 @@
+// useCesiumViewer.ts
+// Military simulator viewer configuration with atmospheric fog, tactical soil base, and sun shading
+
 import { ref, shallowRef } from 'vue';
 import {
     Viewer,
@@ -5,7 +8,9 @@ import {
     Color,
     Math as CesiumMath,
     Cartesian3,
-    EllipsoidTerrainProvider
+    EllipsoidTerrainProvider,
+    DirectionalLight,
+    ShadowMode
 } from 'cesium';
 import type { MapDetailDto } from '../types';
 
@@ -22,8 +27,11 @@ export function useCesiumViewer(map: MapDetailDto) {
 
         const v = new Viewer(container, {
             baseLayer: false,
-            creditContainer: document.createElement('div'), // Hide Cesium ion logo
+            creditContainer: document.createElement('div'),
+            orderIndependentTranslucency: false,
             terrainProvider: new EllipsoidTerrainProvider(),
+            shadows: true,
+            terrainShadows: ShadowMode.RECEIVE_ONLY,
             baseLayerPicker: false,
             geocoder: false,
             homeButton: false,
@@ -34,23 +42,35 @@ export function useCesiumViewer(map: MapDetailDto) {
             fullscreenButton: false,
             infoBox: false,
             selectionIndicator: false,
-            skyBox: false
+            skyBox: false,
+            requestRenderMode: true,
+            maximumRenderTimeChange: Infinity
         });
 
         (v.scene as unknown as { verticalExaggeration: number }).verticalExaggeration = terrainScale.value;
         v.scene.globe.enableLighting = false;
-        v.scene.globe.baseColor = Color.fromCssColorString('#d4c5a9'); // Tactical Sand Base
+
+        // TACTICAL VISUAL OVERHAUL 1: Natural military soil terrain base (replaces sterile bright yellow sand)
+        v.scene.globe.baseColor = Color.fromCssColorString('#545744');
         v.scene.globe.depthTestAgainstTerrain = true;
-        if (v.scene.skyAtmosphere) v.scene.skyAtmosphere.show = false;
-        v.scene.globe.showGroundAtmosphere = false;
-        v.scene.backgroundColor = Color.fromCssColorString('#020617');
+        v.scene.backgroundColor = Color.fromCssColorString('#0b132b');
 
-        const theaterRect = Rectangle.fromDegrees(map.minLon, map.minLat, map.maxLon, map.maxLat);
-        v.scene.globe.cartographicLimitRectangle = theaterRect;
-        v.scene.screenSpaceCameraController.minimumZoomDistance = 40.0;
-        v.scene.screenSpaceCameraController.maximumZoomDistance = Math.max(map.sizeKm * 1800.0, 30000.0);
+        // TACTICAL VISUAL OVERHAUL 2: Atmospheric Depth Fog (Steel Beasts horizon blending)
+        v.scene.fog.enabled = true;
+        v.scene.fog.density = 0.00035; // Soft natural haze across distant horizons
+        v.scene.fog.screenSpaceErrorFactor = 2.0;
+        v.scene.globe.showGroundAtmosphere = true;
 
-        // Boundary outline
+        // TACTICAL VISUAL OVERHAUL 3: Angled directional sun lighting (contrasts roofs vs vertical facades)
+        v.scene.light = new DirectionalLight({
+            direction: new Cartesian3(-0.6, -0.5, -0.65),
+            intensity: 1.5
+        });
+
+        v.scene.screenSpaceCameraController.minimumZoomDistance = 15.0;
+        v.scene.screenSpaceCameraController.maximumZoomDistance = Math.max(map.sizeKm * 2500.0, 50000.0);
+
+        // Theater Boundary Polyline
         v.entities.add({
             name: 'Theater Boundary Outline',
             polyline: {
@@ -89,11 +109,11 @@ export function useCesiumViewer(map: MapDetailDto) {
             v.camera.flyTo({
                 destination: Cartesian3.fromDegrees(
                     map.centerLon,
-                    map.centerLat - (map.sizeKm / 111.0) * 0.35,
-                    map.sizeKm * 850
+                    map.centerLat - (map.sizeKm / 111.0) * 0.45,
+                    map.sizeKm * 950
                 ),
                 orientation: { heading: 0, pitch: CesiumMath.toRadians(-35), roll: 0 },
-                duration: 1.0
+                duration: 0.8
             });
         }
     };

@@ -1,3 +1,6 @@
+// useSurfaceCamera.ts
+// First-person WASD ground roaming camera clamped smoothly to Float32 DEM terrain
+
 import { ref, type ShallowRef } from 'vue';
 import {
     Viewer,
@@ -10,9 +13,9 @@ import {
 
 export function useSurfaceCamera(viewer: ShallowRef<Viewer | null>) {
     const isGroundMode = ref(false);
-    const eyeHeightMeters = 2.0; // Eye-level view (soldier: 1.8m, APC commander: 2.8m)
-    const baseSpeedMps = 15.0;   // 15 m/s normal walking/driving
-    const sprintSpeedMps = 45.0; // 45 m/s sprint / fast vehicle
+    const eyeHeightMeters = 2.0; // Standard eye level (soldier: 1.8m, commander: 2.4m)
+    const baseSpeedMps = 14.0;   // Walking / patrol speed
+    const sprintSpeedMps = 40.0; // Sprint / light vehicle speed
 
     const keyState = {
         forward: false,
@@ -61,7 +64,6 @@ export function useSurfaceCamera(viewer: ShallowRef<Viewer | null>) {
         const v = viewer.value;
         if (!v) return;
 
-        // Disable standard Cesium orbit controls so they don't fight WASD
         v.scene.screenSpaceCameraController.enableRotate = false;
         v.scene.screenSpaceCameraController.enableTranslate = false;
         v.scene.screenSpaceCameraController.enableZoom = false;
@@ -70,10 +72,8 @@ export function useSurfaceCamera(viewer: ShallowRef<Viewer | null>) {
         window.addEventListener('keydown', onKeyDown);
         window.addEventListener('keyup', onKeyUp);
 
-        // Snap camera immediately to eye-level above ground
         clampCameraToGround();
 
-        // Mouse Look Handler
         mouseLookHandler = new ScreenSpaceEventHandler(v.scene.canvas);
         mouseLookHandler.setInputAction((movement: { position: { x: number; y: number } }) => {
             isLooking = true;
@@ -94,11 +94,10 @@ export function useSurfaceCamera(viewer: ShallowRef<Viewer | null>) {
             isLooking = false;
         }, ScreenSpaceEventType.RIGHT_UP);
 
-        // Pre-render loop for smooth WASD movement
         let lastTimestamp = performance.now();
         tickListener = () => {
             const now = performance.now();
-            const dt = (now - lastTimestamp) / 1000.0;
+            const dt = Math.min((now - lastTimestamp) / 1000.0, 0.1);
             lastTimestamp = now;
 
             if (isGroundMode.value && v) {
@@ -146,18 +145,18 @@ export function useSurfaceCamera(viewer: ShallowRef<Viewer | null>) {
         clampCameraToGround();
     };
 
-    /**
-     * Hardware Ground Clamping: locks camera height strictly to (ground elevation + eye height).
-     */
     const clampCameraToGround = () => {
         const v = viewer.value;
         if (!v) return;
 
         const carto = Cartographic.fromCartesian(v.camera.position);
-        const groundHeight = v.scene.globe.getHeight(carto) || 120.0;
-        const targetAltitude = groundHeight + eyeHeightMeters;
+        const groundHeight = v.scene.globe.getHeight(carto);
 
-        v.camera.position = Cartesian3.fromRadians(carto.longitude, carto.latitude, targetAltitude);
+        // If height is unresolved, maintain current elevation instead of dropping to zero
+        if (groundHeight !== undefined && !isNaN(groundHeight)) {
+            const targetAltitude = groundHeight + eyeHeightMeters;
+            v.camera.position = Cartesian3.fromRadians(carto.longitude, carto.latitude, targetAltitude);
+        }
     };
 
     return {
